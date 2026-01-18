@@ -1,6 +1,6 @@
 <p align="center">
-  <img src="assets/heart.png" height="40" style="vertical-align:middle; margin-right:10px;" />
-  <img src="assets/banner.svg" height="40" style="vertical-align:middle;" />
+  <img src="assets/heart.png" height="80" style="vertical-align:middle; margin-right:10px;" />
+  <img src="assets/banner.svg" height="80" style="vertical-align:middle;" />
 </p>
 
 ----
