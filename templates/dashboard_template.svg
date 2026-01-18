@@ -14,7 +14,7 @@
       .text-title { 
         fill: #000000; 
         font-family: 'Google Sans', sans-serif; 
-        font-weight: bold; 
+        font-weight: normal; 
         font-size: 26px; 
       }
 
