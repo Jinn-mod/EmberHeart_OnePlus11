@@ -56,9 +56,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [[ -n $(git status --porcelain dashboard.svg) ]]; then
-            git add dashboard.svg
-            git commit -m "Update dashboard badge [skip ci]"
+          if [[ -n $(git status --porcelain ci.svg) ]]; then
+            git add ci.svg
+            git commit -m "Update CI badge"
             git push origin badges
           else
             echo "No change in badge status."
