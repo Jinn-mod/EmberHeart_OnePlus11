@@ -20,7 +20,7 @@
 
       /* Dark Mode */
       @media (prefers-color-scheme: dark) {
-        .bg-card { fill: #1D1C21; }
+        .bg-card { fill: #0D1117; }
         .text-title { fill: #FFFFFF; }
       }
     </style>

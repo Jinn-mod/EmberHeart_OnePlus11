@@ -28,7 +28,7 @@ def main():
     final_commit = raw_commit.replace('COMMIT_HASH', commit_hash[:7]) # Shorten to 7 chars
 
     # Load Wrapper
-    wrapper = read_file('templates/dashboard_template.svg')
+    wrapper = read_file('templates/ci_template.svg')
 
     # Inject into Wrapper
     wrapper = wrapper.replace('{{STATUS}}', final_status)
