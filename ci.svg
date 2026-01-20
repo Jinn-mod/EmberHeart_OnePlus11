@@ -20,7 +20,7 @@
 
       /* Dark Mode */
       @media (prefers-color-scheme: dark) {
-        .bg-card { fill: #1D1C21; }
+        .bg-card { fill: #0D1117; }
         .text-title { fill: #FFFFFF; }
       }
     </style>
@@ -114,7 +114,7 @@
       <line x1="15" x2="21" y1="12" y2="12"/>
     </svg>
   </g>
-  <text x="38" y="19" font-family="'Google Sans', sans-serif" font-size="13" font-weight="500" fill="#007AFF">3e333cc</text>
+  <text x="38" y="19" font-family="'Google Sans', sans-serif" font-size="13" font-weight="500" fill="#007AFF">a6ddd43</text>
 </svg>
   </g>
 
