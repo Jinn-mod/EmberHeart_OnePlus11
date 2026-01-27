@@ -32,6 +32,7 @@
 > - [Guide to fix Unusually long boot times on A16 when using Nethunter](docs/a16_fix.md)
 > - [Link to Org repo maintained by @fatalcoder524](https://github.com/EmberHeart-Kernels/EmberHeart_OnePlus11)
 > - [Loading chipset drivers](docs/drivers.md)
+> - [Porting Kernel for other OnePlus devices (GKI2 - i.e. kernel 5.10 or above)](docs/porting.md)
 
 ----
 

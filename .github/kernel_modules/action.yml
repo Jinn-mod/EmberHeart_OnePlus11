@@ -250,6 +250,7 @@ runs:
         EOF
 
     - name: Add my kernel patches to msm kernel
+      if: env.OP_SOC == 'kalama'
       shell: bash
       run: |
         set -euo pipefail
