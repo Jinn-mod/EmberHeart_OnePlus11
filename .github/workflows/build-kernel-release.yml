@@ -50,8 +50,9 @@ on:
         required: true
         type: choice
         options:
+          - OP10-Pro
           - OP11
-        default: OP11
+        default: OP10-Pro
 
 jobs:
   set-op-model:
