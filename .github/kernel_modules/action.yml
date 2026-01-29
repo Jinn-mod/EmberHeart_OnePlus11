@@ -295,7 +295,7 @@ runs:
           if [ -n "$latest" ] && [ -x "$latest/bin/clang" ]; then
             CLANG_BIN="$latest/bin"
             CLANG_FOUND=true
-          fi
+            fi
         done
         if ! $CLANG_FOUND && command -v clang >/dev/null 2>&1; then
           CLANG_BIN="$(dirname "$(command -v clang)")"
@@ -307,6 +307,23 @@ runs:
         CLANG_VERSION="$("$CLANG_BIN/clang" --version | head -n1)"
         echo "CLANG_VERSION=$CLANG_VERSION" >> "$GITHUB_ENV"
         echo "Detected Clang: $CLANG_VERSION"
+
+    # --- YAHAN MAINE FIX ADD KIYA HAI ---
+    - name: Fix Source Code Errors
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Go to kernel directory
+        KERNEL_ROOT="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
+        echo "Entering kernel dir: $KERNEL_ROOT"
+        cd "$KERNEL_ROOT"
+        
+        echo "Fixing stack_pointer.h in kernel_modules..."
+        find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer;/' {} +
+        
+        echo "Fixing kgdb.h in kernel_modules..."
+        find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
+        echo "Fix applied successfully!"
 
     - name: Build Kernel Modules 
       shell: bash
@@ -338,17 +355,8 @@ runs:
 
         echo "Building kernel modules..."
         make ARCH=arm64 LLVM=1 O=out olddefconfig
-        make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out CC="ccache clang" modules       
+        make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out CC="ccache clang" modules        
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out INSTALL_MOD_PATH=$INSTALL_MOD_PATH modules_install
-
-        #echo "Building out of tree external kernel modules..."
-        #cd "$KERNEL_PLATFORM"
-        #QCA_WLAN_DIR="$GITHUB_WORKSPACE/$CONFIG/vendor/qcom/opensource/wlan/qcacld-3.0/"
-        
-        #cd "$MSM"
-        #make -C ../../vendor/qcom/opensource/datarmnet-ext/aps M=../../vendor/qcom/opensource/datarmnet-ext/aps KERNEL_SRC=$KERNEL_PLATFORM/./msm-kernel O=$OUT LLVM=1 DEPMOD=depmod DTC=$KERNEL_PLATFORM/build/kernel/build-tools/path/linux-x86/dtc RMNET_CORE_INC_DIR=$CONFIG/vendor/qcom/opensource/datarmnet/core RMNET_CORE_PATH=vendor/qcom/opensource/datarmnet/core DATARMNET_CORE_PATH=datarmnet/core ANDROID_BUILD_TOP=$CONFIG KBUILD_MIXED_TREE=..//device/qcom/kalama-kernel
-        
-        #make -C ../../vendor/qcom/opensource/wlan/platform M=../../vendor/qcom/opensource/wlan/platform KERNEL_SRC=$KERNEL_PLATFORM/./msm-kernel O=$OUT LLVM=1 DEPMOD=depmod DTC=$KERNEL_PLATFORM/build/kernel/build-tools/path/linux-x86/dtc WLAN_PLATFORM_ROOT=$CONFIG/vendor/qcom/opensource/wlan/platform HAVE_ARCH_COMPILER_H=y CONFIG_CNSS_OUT_OF_TREE=y CONFIG_CNSS2=m CONFIG_CNSS2_QMI=y CONFIG_CNSS_QMI_SVC=m CONFIG_CNSS_PLAT_IPC_QMI_SVC=m CONFIG_CNSS_GENL=m CONFIG_WCNSS_MEM_PRE_ALLOC=m CONFIG_CNSS_UTILS=m CONFIG_BUS_AUTO_SUSPEND=y CONFIG_CNSS_HW_SECURE_DISABLE=y KERNEL_SUPPORTS_NESTED_COMPOSITES=n KBUILD_EXTRA_SYMBOLS=$OUT/sec-module-symvers_intermediates/Module.symvers ANDROID_BUILD_TOP=$CONFIG KBUILD_MIXED_TREE=..//device/qcom/kalama-kernel
 
     - name: Filter modules
       shell: bash
