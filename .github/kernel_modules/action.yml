@@ -308,27 +308,24 @@ runs:
         echo "CLANG_VERSION=$CLANG_VERSION" >> "$GITHUB_ENV"
         echo "Detected Clang: $CLANG_VERSION"
 
-    # --- YAHAN MAINE FIX ADD KIYA HAI ---
-    - name: Fix Source Code Errors
-      shell: bash
-      run: |
-        set -euo pipefail
-        # Go to kernel directory
-        KERNEL_ROOT="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
-        echo "Entering kernel dir: $KERNEL_ROOT"
-        cd "$KERNEL_ROOT"
-        
-        echo "Fixing stack_pointer.h in kernel_modules..."
-        find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer;/' {} +
-        
-        echo "Fixing kgdb.h in kernel_modules..."
-        find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
-        echo "Fix applied successfully!"
-
     - name: Build Kernel Modules 
       shell: bash
       run: |
         set -euo pipefail
+        
+        # --- NUCLEAR FIX START: Isko ab koi skip nahi kar sakta ---
+        echo ">>> APPLYING MANDATORY FIXES FOR STACK_POINTER AND KGDB..."
+        # Kernel directory set karo
+        FIX_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
+        echo "Entering directory: $FIX_DIR"
+        cd "$FIX_DIR"
+        
+        # Patch commands chalao
+        find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer;/' {} +
+        find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
+        echo ">>> FIXES APPLIED SUCCESSFULLY!"
+        # --- NUCLEAR FIX END ---
+
         KERNEL_PLATFORM="$GITHUB_WORKSPACE/$CONFIG/kernel_platform"
         MSM="$KERNEL_PLATFORM/msm-kernel"
         OUT=out
