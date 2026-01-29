@@ -1,5 +1,5 @@
 {
-  "model": "OP10pro",
+  "model": "OP10-Pro",
   "soc": "waipio",
   "branch": "oneplus/sm8450",
   "manifest_oos14": "oneplus_10_pro_u.xml",
