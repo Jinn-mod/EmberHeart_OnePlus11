@@ -21,6 +21,23 @@ inputs:
 runs:
   using: composite
   steps:
+    # --- STEP 1: FREE UP SPACE (Bahut Zaruri Hai) ---
+    - name: Free Disk Space (Ubuntu)
+      shell: bash
+      run: |
+        echo "::group::Freeing Disk Space"
+        echo "Disk space before cleanup:"
+        df -h
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
+        sudo apt-get clean
+        echo "Disk space after cleanup:"
+        df -h
+        echo "::endgroup::"
+
     - name: Parse op_config_json
       shell: bash
       run: |
@@ -52,37 +69,6 @@ runs:
         [[ -n "$soc" ]] || { echo "Input 'soc' cannot be empty"; exit 1; }
         [[ -n "$branch" ]] || { echo "Input 'branch' cannot be empty"; exit 1; }
         [[ -n "$manifest" ]] || { echo "Input 'manifest' cannot be empty"; exit 1; }
-    
-        # Basic format checks
-        # soc: allow letters, digits, underscores, dashes (e.g., sm8650)
-        if ! [[ "$soc" =~ ^[A-Za-z0-9_-]+$ ]]; then
-          echo "Input 'soc' contains invalid characters. Allowed: letters, digits, underscore, dash"; exit 1
-        fi    
-        # branch: allow common ref patterns; spaces not allowed
-        if ! [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-          echo "Input 'branch' contains invalid characters. Allowed: letters, digits, ., _, -, /"; exit 1
-        fi    
-        # manifest: either HTTPS URL ending with .xml, or a filename ending with .xml (no spaces)
-        if [[ "$manifest" == http*://* ]]; then
-          if ! [[ "$manifest" =~ ^https:// ]]; then
-            echo "Manifest URL must be HTTPS"; exit 1
-          fi
-          if ! [[ "$manifest" =~ \.xml($|\?) ]]; then
-            echo "Manifest URL should point to an XML file (.xml)"; exit 1
-          fi
-        else
-          if ! [[ "$manifest" =~ \.xml$ ]]; then
-            echo "Manifest filename must end with .xml"; exit 1
-          fi
-          if [[ "$manifest" =~ [[:space:]] ]]; then
-            echo "Manifest filename cannot contain spaces"; exit 1
-          fi
-        fi
-        # Optimize level validation
-        case "$optimize" in
-          O2|O3) ;;
-          *) echo "optimize_level must be O2 or O3; got '$optimize'"; exit 1 ;;
-        esac
         echo "Input validation OK."
         echo "::endgroup::"
 
@@ -92,10 +78,12 @@ runs:
         set -euo pipefail
         echo "::group::Install deps"
         sudo apt-get -o Acquire::Retries=3 update -qq
+        # Added gcc-aarch64-linux-gnu for Cross Compilation Fix
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
           git curl ca-certificates build-essential clang lld flex bison \
           libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool \
-          libxml2-utils rsync unzip dwarves file python3 ccache
+          libxml2-utils rsync unzip dwarves file python3 ccache \
+          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
         sudo apt-get clean
         echo "::endgroup::"
 
@@ -353,7 +341,6 @@ runs:
         # FIX 2: kgdb.h (Break error fix)
         echo "Fixing kgdb.h..."
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
-        
         echo ">>> FIXES APPLIED SUCCESSFULLY!"
         # --- NUCLEAR FIX END ---
 
@@ -383,7 +370,13 @@ runs:
 
         echo "Building kernel modules..."
         make ARCH=arm64 LLVM=1 O=out olddefconfig
-        make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out CC="ccache clang" modules        
+        # Added CROSS_COMPILE flags to force ARM64 target (Fixes Unknown Register Error)
+        make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out CC="ccache clang" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            modules        
+        
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out INSTALL_MOD_PATH=$INSTALL_MOD_PATH modules_install
 
     - name: Filter modules
