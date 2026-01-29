@@ -77,12 +77,12 @@ jobs:
             model=$(basename "$file" .json)
             models+=("$model")
           done < <(find configs/ -name "*.json" -print0)
-        
+          
           if [ ${#models[@]} -eq 0 ]; then
             echo "Error: No config files found in configs/ directory!"
             exit 1
           fi
-        
+          
           echo "[" > matrix.json
           for i in "${!models[@]}"; do
             model="${models[$i]}"
@@ -123,6 +123,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Fix Source Code Errors
+        run: |
+          echo "Fixing stack_pointer.h..."
+          find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer;/' {} +
+          echo "Fixing kgdb.h..."
+          find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
 
       - name: Build Kernel
         uses: ./.github/actions
