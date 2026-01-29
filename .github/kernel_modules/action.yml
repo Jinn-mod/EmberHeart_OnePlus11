@@ -346,7 +346,7 @@ runs:
         echo "Entering directory: $FIX_DIR"
         cd "$FIX_DIR"
         
-        # FIX 1: stack_pointer.h (Is baar 'register' aur 'asm' dono hata rahe hain)
+        # FIX 1: stack_pointer.h (Removes 'register' AND 'asm') - THIS IS THE CORRECT FIX
         echo "Fixing stack_pointer.h..."
         find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/unsigned long current_stack_pointer;/' {} +
         
