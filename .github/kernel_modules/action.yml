@@ -341,14 +341,19 @@ runs:
         set -euo pipefail
         
         # --- NUCLEAR FIX START ---
-        echo ">>> APPLYING MANDATORY FIXES FOR KGDB..."
-        # Kernel directory set karo
+        echo ">>> APPLYING MANDATORY FIXES FOR STACK_POINTER AND KGDB..."
         FIX_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         echo "Entering directory: $FIX_DIR"
         cd "$FIX_DIR"
         
-        # Patch commands chalao - ONLY KGDB, NO STACK_POINTER
+        # FIX 1: stack_pointer.h (Is baar 'register' aur 'asm' dono hata rahe hain)
+        echo "Fixing stack_pointer.h..."
+        find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/unsigned long current_stack_pointer;/' {} +
+        
+        # FIX 2: kgdb.h (Break error fix)
+        echo "Fixing kgdb.h..."
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
+        
         echo ">>> FIXES APPLIED SUCCESSFULLY!"
         # --- NUCLEAR FIX END ---
 
