@@ -159,6 +159,13 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Fix Source Code Errors
+        run: |
+          echo "Fixing stack_pointer.h..."
+          find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer;/' {} +
+          echo "Fixing kgdb.h..."
+          find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
+
       - name: Build Kernel Modules
         uses: ./.github/kernel_modules
         with:
@@ -283,43 +290,4 @@ jobs:
           - [+] SUSFS v2.0.0
           - [+] Wireguard Support
           - [+] Magic Mount Support
-          - [+] Ptrace message leak fix for kernels < 5.16
-          - [+] Manual Hooks [scope_min_manual_hooks_v1.4]
-          - [+] CONFIG_TMPFS_XATTR Support [Mountify Support]
-          - [+] BBR v1 Support
-          - [+] Baseband Guard Support (BBG)
-          - [+] Nethunter Support
-          - [+] Mem kernel driver by @Poko-Apps [r/w to physical memory]
-          - [+] IP Set Support
-
-          EOF
-          
-          # Output for debugging
-          echo "--- Final Release Notes ---"
-          cat release_notes.md
-
-      - name: Create GitHub Pre-release
-        if: ${{ inputs.release_type == 'Pre-release' }}
-        run: |
-          gh release create "${{ env.NEW_TAG }}" \
-            --repo "${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}" \
-            --title "*Test-build*-${{ env.RELEASE_NAME }}-${{ env.OS_VERSION }}*Test Build*" \
-            --notes-file release_notes.md \
-            --prerelease
-
-      - name: Create GitHub Release
-        if: ${{ inputs.release_type == 'Release' }}
-        run: |
-          gh release create "${{ env.NEW_TAG }}" \
-            --repo "${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}" \
-            --title "${{ env.RELEASE_NAME }}-${{ env.OS_VERSION }}" \
-            --notes-file release_notes.md
-
-      - name: Upload Release Assets Dynamically
-        run: |
-          for file in ./downloaded-artifacts/*/*.{zip,img}; do
-            if [ -f "$file" ]; then
-              echo "Uploading $file..."
-              gh release upload "${{ env.NEW_TAG }}" "$file" --clobber
-            fi
-          done
+          - [+] Ptrace
