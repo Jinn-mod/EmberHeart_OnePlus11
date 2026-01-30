@@ -1,4 +1,4 @@
-name: Build OnePlus kernel modules (Force Strike)
+name: Build OnePlus kernel modules (Nuclear Cleanup)
 
 permissions:
   contents: write
@@ -16,22 +16,27 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Cleanup Space
+    - name: 🚀 Nuclear Space Cleanup
       shell: bash
       run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        echo "Cleaning up everything to free space..."
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
         sudo apt-get clean
+        df -h # Space check karne ke liye
 
-    - name: Install Essential Deps (Fast)
+    - name: 🛠️ Install Essential Deps (Fast)
       shell: bash
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends \
-          git curl build-essential clang lld flex bison libelf-dev libssl-dev \
-          liblz4-tool libxml2-utils rsync unzip dwarves python3 ccache \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          bc bison build-essential flex git-core libelf-dev libssl-dev \
+          unzip ccache jq python3 rsync
 
-    - name: Sync Kernel Source
+    - name: 📥 Sync Kernel Source
       shell: bash
       run: |
         set -euo pipefail
@@ -48,7 +53,7 @@ runs:
         "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$BRANCH" -m "OP10-Pro_OOS15_MODULES" --depth=1
         "$REPO" sync -c -j$(nproc --all) --no-clone-bundle --no-tags
 
-    - name: Add Ember's WiFi & Hacking Configs
+    - name: 💉 Inject Ember's Driver & Hacking Configs
       shell: bash
       run: |
         cd "$CONFIG/kernel_platform/msm-kernel"
@@ -63,38 +68,37 @@ runs:
         CONFIG_TCP_CONG_BBR=y
         CONFIG_NETFILTER_XT_TARGET_TTL=m
         CONFIG_IP_SET=m
-        CONFIG_NETFILTER_XT_MATCH_HL=m
         EOF
 
-    - name: Add MemKernel (Root/KSU)
+    - name: 🧬 Add MemKernel (Root/KSU)
       shell: bash
       run: |
         cd "$CONFIG/kernel_platform/msm-kernel"
         curl -LSs "https://raw.githubusercontent.com/Poko-Apps/MemKernel/main/kernel/setup.sh" | bash -s M br0k3n
 
-    - name: Build Modules (Ultimate Override)
+    - name: 🏗️ Build Modules (Override Mode)
       shell: bash
       run: |
         cd "$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         
-        # Mandatory Patching
+        # Patching Source Errors
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0"/\/\/ asm ("brk %0"/' {} +
         sed -i 's/scan_adjusted =/bool scan_adjusted =/' mm/vmscan.c
 
         OUT=out
-        export PATH="$(ls -d $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r* | tail -1)/bin:$PATH"
+        # Using Source's Prebuilt Clang
+        CLANG_PATH=$(ls -d $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r* | tail -1)/bin
+        export PATH="$CLANG_PATH:$PATH"
         
         make ARCH=arm64 O=$OUT LLVM=1 mrproper
         ./scripts/kconfig/merge_config.sh -O $OUT -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${SOC}_GKI.config
         
-        # Linker Fix (Disable LTO to prevent 28min crash)
+        # Disable LTO to prevent Linking Crash
         ./scripts/config --file "$OUT/.config" --disable CONFIG_LTO_CLANG_THIN --disable CONFIG_LTO_CLANG_FULL
         
-        # Build with NO-ERROR
-        make -j$(nproc --all) ARCH=arm64 LLVM=1 O=$OUT CC="ccache clang" \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
+        # Final Build Command
+        make -j$(nproc --all) ARCH=arm64 LLVM=1 O=$OUT \
             KCFLAGS="-Wno-error -Wno-macro-redefined -Wno-declaration-after-statement" \
             modules
 
@@ -103,9 +107,9 @@ runs:
         find $OUT -name "*.ko" -exec cp {} artifacts/ \;
         cd artifacts && zip -r ../kernel_modules_jinn.zip .
 
-    - name: Upload Artifacts
+    - name: 📤 Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: jinn-modules-op10
+        name: jinn-modules-final
         path: ${{ env.CONFIG }}/kernel_platform/msm-kernel/kernel_modules_jinn.zip
         
