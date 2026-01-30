@@ -1,4 +1,4 @@
-name: Build OnePlus kernel modules (Run 35 - Verified Sync)
+name: Build OnePlus kernel modules (Run 35 - Original Sync)
 
 permissions:
   contents: write
@@ -22,7 +22,7 @@ runs:
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo apt-get clean
 
-    - name: 🛠️ Install Deps
+    - name: 🛠️ Essential Deps
       shell: bash
       run: |
         sudo apt-get update -qq
@@ -30,7 +30,7 @@ runs:
           bc bison build-essential flex git-core libelf-dev libssl-dev \
           unzip ccache jq python3 rsync
 
-    - name: 📥 Sync Kernel Source (Direct Fix)
+    - name: 📥 Sync Kernel Source (Run 28 Style)
       shell: bash
       run: |
         set -euo pipefail
@@ -46,19 +46,20 @@ runs:
         [ ! -x "$REPO" ] && curl -s https://storage.googleapis.com/git-repo-downloads/repo -o "$REPO" && chmod +x "$REPO"
         mkdir -p "$MODEL" && cd "$MODEL"
         
-        # Yahan humne direct manifest ka naam de diya hai jo Run 1-28 tak kaam kar raha tha
-        "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$BRANCH" -m "oneplus10pro_v.xml" --depth=1
+        # YE HAI FIX: Hum direct inputs.manifest use kar rahe hain jo 'OOS15' hai
+        # OnePlus ke standard manifest folder mein yahi pattern kaam karta hai
+        "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$BRANCH" -m "${{ inputs.manifest }}.xml" --depth=1
         "$REPO" sync -c -j$(nproc --all) --no-clone-bundle --no-tags
 
     - name: 💉 Inject RTL8188EU & Hacking Configs
       shell: bash
       run: |
         cd "$CONFIG/kernel_platform/msm-kernel"
-        # Ember's Recommended Driver
+        # Adding Ember's Fix
         git clone --depth=1 https://github.com/ivanovborislav/rtl8188eu.git drivers/net/wireless/rtl8188eu
         echo "obj-m += rtl8188eu/" >> drivers/net/wireless/Makefile
         
-        # Hacking Flags (BBR, TTL, IPSET)
+        # NetHunter Flags
         cat >> arch/arm64/configs/gki_defconfig <<EOF
         CONFIG_MODULES=y
         CONFIG_RTL8188EU=m
@@ -78,7 +79,7 @@ runs:
       run: |
         cd "$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         
-        # Source Fixes (Same as successful Run 28)
+        # Fixing Source Errors (Mandatory for OnePlus)
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0"/\/\/ asm ("brk %0"/' {} +
         sed -i 's/scan_adjusted =/bool scan_adjusted =/' mm/vmscan.c
@@ -90,10 +91,10 @@ runs:
         make ARCH=arm64 O=$OUT LLVM=1 mrproper
         ./scripts/kconfig/merge_config.sh -O $OUT -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${SOC}_GKI.config
         
-        # Disable LTO (Linking Fix)
+        # Linking Fix: LTO Disable
         ./scripts/config --file "$OUT/.config" --disable CONFIG_LTO_CLANG_THIN --disable CONFIG_LTO_CLANG_FULL
         
-        # Final Build with No-Error
+        # Build with No-Error Bypass
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=$OUT \
             KCFLAGS="-Wno-error -Wno-macro-redefined -Wno-declaration-after-statement" \
             modules
