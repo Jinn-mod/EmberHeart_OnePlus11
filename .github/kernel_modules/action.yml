@@ -1,108 +1,44 @@
-name: Build OnePlus kernel modules (Run 39 - Survival Mode)
-
-permissions:
-  contents: write
-  actions: write
-
-inputs:
-  op_config_json:
-    required: true
-    type: string
-  manifest:
-    required: true
-    type: string
-    default: OOS15
-
-runs:
-  using: composite
-  steps:
-    - name: 🚀 Fast Cleanup
-      shell: bash
-      run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo apt-get clean
-
-    - name: 🛠️ Install Only Light Deps
-      shell: bash
-      run: |
-        sudo apt-get update -qq
-        # Humne Clang/GCC hata diya hai taaki crash na ho
-        sudo apt-get install -y --no-install-recommends \
-          bc bison build-essential flex git-core libelf-dev libssl-dev \
-          unzip jq python3 rsync ccache
-
-    - name: 📥 Sync Kernel Source (Run 28 Style)
+    - name: Build Kernel Modules (Final Path Fix)
       shell: bash
       run: |
         set -euo pipefail
-        echo '${{ inputs.op_config_json }}' > /tmp/config.json
-        MODEL=$(jq -r '.model' /tmp/config.json)
-        SOC=$(jq -r '.soc' /tmp/config.json)
-        BRANCH=$(jq -r '.branch' /tmp/config.json)
+        # 1. Sabse pehle compiler dhoondte hain
+        echo "Searching for Clang in all prebuilts..."
+        CLANG_BIN=$(find $GITHUB_WORKSPACE/$CONFIG/kernel_platform -name clang -type f -path "*/bin/clang" | head -n 1 | xargs dirname || echo "")
         
-        echo "CONFIG=$MODEL" >> "$GITHUB_ENV"
-        echo "SOC=$SOC" >> "$GITHUB_ENV"
+        if [ -z "$CLANG_BIN" ]; then
+          echo "ERROR: Clang not found in synced source!"
+          # Fallback to system clang if source one is missing
+          CLANG_BIN="/usr/bin"
+        fi
         
-        REPO="/usr/local/bin/repo"
-        [ ! -x "$REPO" ] && curl -s https://storage.googleapis.com/git-repo-downloads/repo -o "$REPO" && chmod +x "$REPO"
-        mkdir -p "$MODEL" && cd "$MODEL"
-        
-        # Original logic using manifest variable
-        MANIFEST_VAL="oneplus_10_pro_v.xml"
-        
-        "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$BRANCH" -m "$MANIFEST_VAL" --depth=1
-        "$REPO" sync -c -j$(nproc --all) --no-clone-bundle --no-tags
+        echo "Compiler found at: $CLANG_BIN"
+        export PATH="$CLANG_BIN:$PATH"
 
-    - name: 💉 Inject RTL8188EU & Hacking Configs
-      shell: bash
-      run: |
-        cd "$CONFIG/kernel_platform/msm-kernel"
-        # Adding Ember's Fix
-        git clone --depth=1 https://github.com/ivanovborislav/rtl8188eu.git drivers/net/wireless/rtl8188eu
-        echo "obj-m += rtl8188eu/" >> drivers/net/wireless/Makefile
-        
-        # NetHunter Flags
-        cat >> arch/arm64/configs/gki_defconfig <<EOF
-        CONFIG_MODULES=y
-        CONFIG_RTL8188EU=m
-        CONFIG_TCP_CONG_BBR=y
-        CONFIG_NETFILTER_XT_TARGET_TTL=m
-        CONFIG_IP_SET=m
-        EOF
-
-    - name: 🏗️ Build Modules (Using Source Tools)
-      shell: bash
-      run: |
+        # 2. Build process shuru karte hain
         cd "$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         
-        # Manual Patches
+        # Mandatory Patching (Run 28 fixes)
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0"/\/\/ asm ("brk %0"/' {} +
         sed -i 's/scan_adjusted =/bool scan_adjusted =/' mm/vmscan.c
 
         OUT=out
-        # Ember's Tip: Use OnePlus provided compiler
-        CLANG_PATH=$(ls -d $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r* | tail -1)/bin
-        export PATH="$CLANG_PATH:$PATH"
-        
         make ARCH=arm64 O=$OUT LLVM=1 mrproper
-        ./scripts/kconfig/merge_config.sh -O $OUT -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${SOC}_GKI.config
         
-        # Linking Fix: LTO Disable
+        # GKI Config Merge
+        ./scripts/kconfig/merge_config.sh -O $OUT -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${OP_SOC}_GKI.config
+        
+        # Disable LTO (Linking phase fix)
         ./scripts/config --file "$OUT/.config" --disable CONFIG_LTO_CLANG_THIN --disable CONFIG_LTO_CLANG_FULL
         
-        # Build with KCFLAGS
+        # Build with Master Bypass Flags
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=$OUT \
-            KCFLAGS="-Wno-error -Wno-macro-redefined -Wno-declaration-after-statement" \
+            KCFLAGS="-Wno-error -Wno-macro-redefined -Wno-declaration-after-statement -Wno-unused-variable" \
             modules
 
+        # Zip artifacts
         mkdir -p artifacts
         find $OUT -name "*.ko" -exec cp {} artifacts/ \;
         cd artifacts && zip -r ../kernel_modules_final.zip .
-
-    - name: 📤 Upload Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: jinn-modules-final
-        path: ${{ env.CONFIG }}/kernel_platform/msm-kernel/kernel_modules_final.zip
         
