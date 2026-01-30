@@ -1,4 +1,4 @@
-name: Build OnePlus kernel modules (Run 35 - Original Sync)
+name: Build OnePlus kernel modules (Run 37 - Fixed Manifest)
 
 permissions:
   contents: write
@@ -30,7 +30,7 @@ runs:
           bc bison build-essential flex git-core libelf-dev libssl-dev \
           unzip ccache jq python3 rsync
 
-    - name: 📥 Sync Kernel Source (Run 28 Style)
+    - name: 📥 Sync Kernel Source (Original Style)
       shell: bash
       run: |
         set -euo pipefail
@@ -39,6 +39,9 @@ runs:
         SOC=$(jq -r '.soc' /tmp/config.json)
         BRANCH=$(jq -r '.branch' /tmp/config.json)
         
+        # --- YE WAHI LOGIC HAI JO RUN 28 MEIN KAAM KAR RAHA THA ---
+        MANIFEST="OP_MANIFEST_${{ inputs.manifest }}_MODULES"
+        
         echo "CONFIG=$MODEL" >> "$GITHUB_ENV"
         echo "SOC=$SOC" >> "$GITHUB_ENV"
         
@@ -46,20 +49,17 @@ runs:
         [ ! -x "$REPO" ] && curl -s https://storage.googleapis.com/git-repo-downloads/repo -o "$REPO" && chmod +x "$REPO"
         mkdir -p "$MODEL" && cd "$MODEL"
         
-        # YE HAI FIX: Hum direct inputs.manifest use kar rahe hain jo 'OOS15' hai
-        # OnePlus ke standard manifest folder mein yahi pattern kaam karta hai
-        "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$BRANCH" -m "${{ inputs.manifest }}.xml" --depth=1
+        # Direct Reference for Repo Init
+        "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$BRANCH" -m "oneplus10pro_v.xml" --depth=1
         "$REPO" sync -c -j$(nproc --all) --no-clone-bundle --no-tags
 
-    - name: 💉 Inject RTL8188EU & Hacking Configs
+    - name: 💉 Inject RTL8188EU & Configs
       shell: bash
       run: |
         cd "$CONFIG/kernel_platform/msm-kernel"
-        # Adding Ember's Fix
         git clone --depth=1 https://github.com/ivanovborislav/rtl8188eu.git drivers/net/wireless/rtl8188eu
         echo "obj-m += rtl8188eu/" >> drivers/net/wireless/Makefile
         
-        # NetHunter Flags
         cat >> arch/arm64/configs/gki_defconfig <<EOF
         CONFIG_MODULES=y
         CONFIG_RTL8188EU=m
@@ -68,7 +68,7 @@ runs:
         CONFIG_IP_SET=m
         EOF
 
-    - name: 🧬 Add MemKernel (Root/KSU)
+    - name: 🧬 Add MemKernel
       shell: bash
       run: |
         cd "$CONFIG/kernel_platform/msm-kernel"
@@ -79,7 +79,7 @@ runs:
       run: |
         cd "$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         
-        # Fixing Source Errors (Mandatory for OnePlus)
+        # Essential Fixes
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0"/\/\/ asm ("brk %0"/' {} +
         sed -i 's/scan_adjusted =/bool scan_adjusted =/' mm/vmscan.c
@@ -91,10 +91,9 @@ runs:
         make ARCH=arm64 O=$OUT LLVM=1 mrproper
         ./scripts/kconfig/merge_config.sh -O $OUT -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${SOC}_GKI.config
         
-        # Linking Fix: LTO Disable
+        # LTO Disable (Important)
         ./scripts/config --file "$OUT/.config" --disable CONFIG_LTO_CLANG_THIN --disable CONFIG_LTO_CLANG_FULL
         
-        # Build with No-Error Bypass
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=$OUT \
             KCFLAGS="-Wno-error -Wno-macro-redefined -Wno-declaration-after-statement" \
             modules
@@ -103,7 +102,7 @@ runs:
         find $OUT -name "*.ko" -exec cp {} artifacts/ \;
         cd artifacts && zip -r ../kernel_modules_jinn.zip .
 
-    - name: 📤 Upload Artifacts
+    - name: 📤 Upload
       uses: actions/upload-artifact@v4
       with:
         name: jinn-modules-final
