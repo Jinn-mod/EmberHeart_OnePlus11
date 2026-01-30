@@ -272,7 +272,7 @@ runs:
         FIX_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         cd "$FIX_DIR"
         
-        # FIX 1: stack_pointer.h - NO EDIT (LTO disabled handles this)
+        # FIX 1: Skipping stack_pointer.h edit (LTO disabled handles this)
         echo "Skipping stack_pointer.h edits (Relying on disabling LTO)..."
         
         # FIX 2: kgdb.h (Break error fix)
@@ -283,9 +283,12 @@ runs:
         echo "Fixing vmscan.c missing variable..."
         sed -i 's/scan_adjusted = (!cgroup_reclaim/bool scan_adjusted = (!cgroup_reclaim/' mm/vmscan.c
         
-        # FIX 4: thermal_sysfs.c (Missing header for kvzalloc)
-        echo "Fixing thermal_sysfs.c missing header..."
+        # FIX 4: thermal_sysfs.c (Injecting Header AND Undefining macro)
+        # 1. Include header first
+        # 2. Undefine pr_fmt before redefine to avoid error
+        echo "Fixing thermal_sysfs.c macro redefinition..."
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
+        sed -i '/#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt/i #undef pr_fmt' drivers/thermal/thermal_sysfs.c
         
         echo ">>> FIXES APPLIED SUCCESSFULLY!"
         # --- NUCLEAR FIX END ---
