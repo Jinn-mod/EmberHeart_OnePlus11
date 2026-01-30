@@ -1,4 +1,4 @@
-name: Build OnePlus kernel modules (Nuclear Cleanup)
+name: Build OnePlus kernel modules (Run 34 - Final Fix)
 
 permissions:
   contents: write
@@ -16,19 +16,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: 🚀 Nuclear Space Cleanup
+    - name: 🚀 Space Cleanup
       shell: bash
       run: |
-        echo "Cleaning up everything to free space..."
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo apt-get clean
-        df -h # Space check karne ke liye
 
-    - name: 🛠️ Install Essential Deps (Fast)
+    - name: 🛠️ Essential Deps
       shell: bash
       run: |
         sudo apt-get update -qq
@@ -44,13 +38,20 @@ runs:
         MODEL=$(jq -r '.model' /tmp/config.json)
         SOC=$(jq -r '.soc' /tmp/config.json)
         BRANCH=$(jq -r '.branch' /tmp/config.json)
+        
+        # Ye wahi manifest logic hai jo Run 1-28 mein tha
+        MANIFEST="OP_MANIFEST_${{ inputs.manifest }}_MODULES"
+        
         echo "CONFIG=$MODEL" >> "$GITHUB_ENV"
         echo "SOC=$SOC" >> "$GITHUB_ENV"
+        echo "ACTUAL_MANIFEST=${!MANIFEST}" >> "$GITHUB_ENV"
         
         REPO="/usr/local/bin/repo"
         [ ! -x "$REPO" ] && curl -s https://storage.googleapis.com/git-repo-downloads/repo -o "$REPO" && chmod +x "$REPO"
         mkdir -p "$MODEL" && cd "$MODEL"
-        "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$BRANCH" -m "OP10-Pro_OOS15_MODULES" --depth=1
+        
+        # Wahi Purana Repo Init (Run 1-28 Style)
+        "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$BRANCH" -m "${!MANIFEST}" --depth=1
         "$REPO" sync -c -j$(nproc --all) --no-clone-bundle --no-tags
 
     - name: 💉 Inject Ember's Driver & Hacking Configs
@@ -81,28 +82,26 @@ runs:
       run: |
         cd "$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         
-        # Patching Source Errors
+        # Source Fixes (Same as Run 28)
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0"/\/\/ asm ("brk %0"/' {} +
         sed -i 's/scan_adjusted =/bool scan_adjusted =/' mm/vmscan.c
 
         OUT=out
-        # Using Source's Prebuilt Clang
         CLANG_PATH=$(ls -d $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r* | tail -1)/bin
         export PATH="$CLANG_PATH:$PATH"
         
         make ARCH=arm64 O=$OUT LLVM=1 mrproper
         ./scripts/kconfig/merge_config.sh -O $OUT -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${SOC}_GKI.config
         
-        # Disable LTO to prevent Linking Crash
+        # Disable LTO (Linking Fix)
         ./scripts/config --file "$OUT/.config" --disable CONFIG_LTO_CLANG_THIN --disable CONFIG_LTO_CLANG_FULL
         
-        # Final Build Command
+        # Ultimate Bypass
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=$OUT \
             KCFLAGS="-Wno-error -Wno-macro-redefined -Wno-declaration-after-statement" \
             modules
 
-        # Final Collection
         mkdir -p artifacts
         find $OUT -name "*.ko" -exec cp {} artifacts/ \;
         cd artifacts && zip -r ../kernel_modules_jinn.zip .
