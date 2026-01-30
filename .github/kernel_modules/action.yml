@@ -21,20 +21,16 @@ inputs:
 runs:
   using: composite
   steps:
-    # --- STEP 1: FREE UP SPACE (Bahut Zaruri Hai) ---
+    # --- STEP 1: FREE UP SPACE (Safety ke liye) ---
     - name: Free Disk Space (Ubuntu)
       shell: bash
       run: |
         echo "::group::Freeing Disk Space"
-        echo "Disk space before cleanup:"
-        df -h
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /usr/local/lib/android
         sudo rm -rf /opt/ghc
-        sudo rm -rf /opt/hostedtoolcache/CodeQL
         sudo docker image prune --all --force
         sudo apt-get clean
-        echo "Disk space after cleanup:"
         df -h
         echo "::endgroup::"
 
@@ -63,12 +59,6 @@ runs:
         branch="$OP_BRANCH"
         manifest="$OP_MANIFEST"
         optimize='${{ inputs.optimize_level }}'
-    
-        # Non-empty checks
-        [[ -n "$model" ]] || { echo "Input 'model' cannot be empty"; exit 1; }
-        [[ -n "$soc" ]] || { echo "Input 'soc' cannot be empty"; exit 1; }
-        [[ -n "$branch" ]] || { echo "Input 'branch' cannot be empty"; exit 1; }
-        [[ -n "$manifest" ]] || { echo "Input 'manifest' cannot be empty"; exit 1; }
         echo "Input validation OK."
         echo "::endgroup::"
 
@@ -78,7 +68,7 @@ runs:
         set -euo pipefail
         echo "::group::Install deps"
         sudo apt-get -o Acquire::Retries=3 update -qq
-        # Added gcc-aarch64-linux-gnu for Cross Compilation Fix
+        # GCC Aarch64 zaroori hai cross-compilation ke liye
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
           git curl ca-certificates build-essential clang lld flex bison \
           libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool \
@@ -91,10 +81,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Derive a unique build directory name
         CONFIG="$OP_MODEL"
         echo "CONFIG=$CONFIG" >> "$GITHUB_ENV"
-        # Install repo tool if missing
         REPO="/usr/local/bin/repo"
         if [ ! -x "$REPO" ]; then
           curl -s https://storage.googleapis.com/git-repo-downloads/repo -o "$REPO"
@@ -146,40 +134,28 @@ runs:
             if [ -n "$l" ]; then BRANCH_LINE="$l"; break; fi
           fi
         done
-        if [ -z "$BRANCH_LINE" ]; then
-          echo "Error: No BRANCH= found"; exit 1
-        fi
+        if [ -z "$BRANCH_LINE" ]; then echo "Error: No BRANCH= found"; exit 1; fi
         BRANCH_VALUE="${BRANCH_LINE#*=}"
         ANDROID_VERSION="${BRANCH_VALUE%-*}"
-        if [ -z "$ANDROID_VERSION" ]; then
-          echo "Could not parse android version from BRANCH=$BRANCH_VALUE"
-          exit 1
-        fi
         VERSION=$(grep '^VERSION *=' Makefile | awk '{print $3}')
         PATCHLEVEL=$(grep '^PATCHLEVEL *=' Makefile | awk '{print $3}')
-        SUBLEVEL=$(grep '^SUBLEVEL *=' Makefile | awk '{print $3}')
-        FULL_VERSION="$VERSION.$PATCHLEVEL.$SUBLEVEL"
+        FULL_VERSION="$VERSION.$PATCHLEVEL"
         cd "$ARTIFACTS_DIR"
         echo "ANDROID_VER=$ANDROID_VERSION" >> "$GITHUB_ENV"
-        echo "KERNEL_VER=$VERSION.$PATCHLEVEL" >> "$GITHUB_ENV"
+        echo "KERNEL_VER=$FULL_VERSION" >> "$GITHUB_ENV"
         echo "KERNEL_FULL_VER=$ANDROID_VERSION-$FULL_VERSION" >> "$GITHUB_ENV"
-        echo "SUSFS_KERNEL_BRANCH=gki-$ANDROID_VERSION-$VERSION.$PATCHLEVEL" >> "$GITHUB_ENV"
 
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@v1.2.19
       with:
         key: ${{ env.CONFIG }}-modules-${{ env.KERNEL_FULL_VER }}
         max-size: 5G
-        append-timestamp: false
         create-symlink: true
-        job-summary: 'CCache stats'
-        evict-old-files: 'job'
 
     - name: Clone kernel patches for msm kernel
       shell: bash
       run: |
         set -euo pipefail
-        echo "Cloning kernel patches for msm kernel..."
         git clone --depth=1 https://github.com/nullptr-t-oss/kernel_patches.git my_patches
 
     - name: Clean Up ABI Protected Exports
@@ -188,61 +164,44 @@ runs:
         set -euo pipefail
         cd "$CONFIG/kernel_platform"
         rm -f msm-kernel/android/abi_gki_protected_exports_* || true
-        df -h
 
-    - name: Add nethunter specfic drivers already present in kernel to be built as modules
+    - name: Add nethunter specfic drivers
       shell: bash
       run: |
         set -euo pipefail
-        KERNEL_PATH="$GITHUB_WORKSPACE/$CONFIG/kernel_platform"
-        MSM="$KERNEL_PATH/msm-kernel"
-        cd "$MSM"
+        cd "$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         cat >> arch/arm64/configs/gki_defconfig <<EOF
-
         CONFIG_WLAN_VENDOR_REALTEK=y
-
         CONFIG_WLAN_VENDOR_ATH=y
         CONFIG_ATH_COMMON=m
-
         CONFIG_ATH9K=m
         CONFIG_ATH9K_HW=m
         CONFIG_ATH9K_HTC=m
         CONFIG_ATH9K_COMMON=m
-
         CONFIG_ATH10K=m
         CONFIG_ATH10K_USB=m
-
         CONFIG_ATH11K=m
-
         CONFIG_WLAN_VENDOR_MEDIATEK=y
-
         CONFIG_MT7601U=m
-        CONFIG_MT76_CORE=m
-
         CONFIG_MT76_CORE=m
         CONFIG_MT76_USB=m
         CONFIG_MT76x02_LIB=m
         CONFIG_MT76x02_USB=m
         CONFIG_MT76_CONNAC_LIB=m
-
         CONFIG_MT7603E=m
         CONFIG_MT76x2_COMMON=m
         CONFIG_MT76x0_COMMON=m
         CONFIG_MT7615_COMMON=m
         CONFIG_MT7915E=m
         CONFIG_MT7921E=m
-
         CONFIG_MAC80211_LEDS=m
-
         CONFIG_CAN_SLCAN=m
-        
-        # --- WildKernelSU Features (BBR, TTL, IPSET) ---
+        # --- WildKernelSU Features ---
         CONFIG_TCP_CONG_BBR=m
         CONFIG_NETFILTER_XT_TARGET_TTL=m
         CONFIG_NETFILTER_XT_MATCH_TTL=m
         CONFIG_NETFILTER_XT_TARGET_HL=m
         CONFIG_NETFILTER_XT_MATCH_HL=m
-        
         CONFIG_IP_SET=m
         CONFIG_IP_SET_MAX=256
         CONFIG_IP_SET_BITMAP_IP=m
@@ -261,44 +220,26 @@ runs:
         CONFIG_IP_SET_HASH_NETPORT=m
         CONFIG_IP_SET_HASH_NETIFACE=m
         CONFIG_IP_SET_LIST_SET=m
-        # -----------------------------------------------
         EOF
-
-    - name: Add my kernel patches to msm kernel
-      if: env.OP_SOC == 'kalama'
-      shell: bash
-      run: |
-        set -euo pipefail
-        echo "Applying kernel patches to msm kernel from my repo..."
-        cd "$CONFIG/kernel_platform/msm-kernel"
-
-        for patch_file in ../../../my_patches/kernel_patches/op11/msm/*.patch; do
-            echo "Applying patch: $patch_file"
-            patch -p1 < "$patch_file"
-        done
 
     - name: Add memkernel module
       shell: bash
       run: |
         set -euo pipefail
-        KERNEL_PATH="$GITHUB_WORKSPACE/$CONFIG/kernel_platform"
-        MSM="$KERNEL_PATH/msm-kernel"
-        cd "$MSM"
+        cd "$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         curl -LSs "https://raw.githubusercontent.com/Poko-Apps/MemKernel/main/kernel/setup.sh" | bash -s M br0k3n
 
     - name: Add rtw88 modules
       shell: bash
       run: |
         set -euo pipefail
-        KERNEL_PATH="$GITHUB_WORKSPACE/$CONFIG/kernel_platform"
-        MSM="$KERNEL_PATH/msm-kernel"
-        cd "$MSM/drivers/net/wireless/realtek/"
+        cd "$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel/drivers/net/wireless/realtek/"
         rm -rf rtw88
         git clone https://github.com/lwfinger/rtw88.git
         sed -i 's/$(CONFIG_RTW88)/m/g' Makefile
         sed -i '/^source "drivers\/net\/wireless\/realtek\/rtw88\/Kconfig"$/s/.*/ /' Kconfig
 
-    - name: Detect Clang (toolchain for build)
+    - name: Detect Clang
       shell: bash
       run: |
         set -euo pipefail
@@ -315,13 +256,9 @@ runs:
         if ! $CLANG_FOUND && command -v clang >/dev/null 2>&1; then
           CLANG_BIN="$(dirname "$(command -v clang)")"
           CLANG_FOUND=true
-          echo "Using system clang."
         fi
         $CLANG_FOUND || { echo "No clang toolchain found"; exit 1; }
         echo "CLANG_BIN_PATH=$CLANG_BIN" >> "$GITHUB_ENV"
-        CLANG_VERSION="$("$CLANG_BIN/clang" --version | head -n1)"
-        echo "CLANG_VERSION=$CLANG_VERSION" >> "$GITHUB_ENV"
-        echo "Detected Clang: $CLANG_VERSION"
 
     - name: Build Kernel Modules 
       shell: bash
@@ -329,18 +266,18 @@ runs:
         set -euo pipefail
         
         # --- NUCLEAR FIX START ---
-        echo ">>> APPLYING MANDATORY FIXES FOR STACK_POINTER AND KGDB..."
+        echo ">>> APPLYING MANDATORY FIXES..."
         FIX_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
-        echo "Entering directory: $FIX_DIR"
         cd "$FIX_DIR"
         
-        # FIX 1: stack_pointer.h (Removes 'register' AND 'asm') - THIS IS THE CORRECT FIX
-        echo "Fixing stack_pointer.h..."
-        find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/unsigned long current_stack_pointer;/' {} +
+        # FIX 1: Convert current_stack_pointer to MACRO (Solves Duplicate Symbol Error)
+        echo "Fixing stack_pointer.h with Macro..."
+        find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/#define current_stack_pointer ({ unsigned long sp; asm volatile("mov %0, sp" : "=r" (sp)); sp; })/' {} +
         
         # FIX 2: kgdb.h (Break error fix)
         echo "Fixing kgdb.h..."
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
+        
         echo ">>> FIXES APPLIED SUCCESSFULLY!"
         # --- NUCLEAR FIX END ---
 
@@ -356,10 +293,8 @@ runs:
         make ARCH=arm64 mrproper
         mkdir -p "$OUT"
 
-        # Merge defconfig fragments from vendor/kalama_GKI.config
         ./scripts/kconfig/merge_config.sh -O "$OUT" -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${OP_SOC}_GKI.config
 
-        # Thin LTO
         ./scripts/config --file "$OUT/.config" \
             --enable CONFIG_LTO_CLANG_THIN \
             --enable CONFIG_LTO_CLANG \
@@ -370,7 +305,8 @@ runs:
 
         echo "Building kernel modules..."
         make ARCH=arm64 LLVM=1 O=out olddefconfig
-        # Added CROSS_COMPILE flags to force ARM64 target (Fixes Unknown Register Error)
+        
+        # CROSS_COMPILE + GCC Dependencies (Solves Unknown Register Error)
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -387,27 +323,17 @@ runs:
         MSM="$KERNEL_PLATFORM/msm-kernel"
         OUT="$MSM/out"
         UNAME=$(ls "$OUT/lib/modules/")
-
         echo "Copying all modules to $OUT/modules"
         cd "$OUT"
         mkdir -p modules
         find lib/modules/"$UNAME" -type f -name '*.ko' -exec cp {} modules/ \;
-        echo "Total modules copied: $(find modules -type f -name '*.ko' | wc -l)"
-
-        echo "Removing unnecessary modules..."
         cd modules
-        # Download default module list
         curl -L -o default_modules.txt https://raw.githubusercontent.com/nullptr-t-oss/kernel_patches/refs/heads/main/default_modules.txt
-        # Remove modules in the default list
-
         while IFS= read -r module; do
           if [ -e "$module" ]; then
             rm -f "$module"
-            echo "Removed module: $module"
           fi
         done < default_modules.txt
-        cd ..
-        echo "Modules remaining after filtering: $(find modules -type f -name '*.ko' | wc -l)"
 
     - name: Create Kernel Modules zip
       id: create_zip
@@ -415,35 +341,24 @@ runs:
       run: |
         set -euo pipefail
         CONFIG_DIR="$GITHUB_WORKSPACE/$CONFIG"
-        KERNEL_PLATFORM="$CONFIG_DIR/kernel_platform"
-        MSM="$KERNEL_PLATFORM/msm-kernel"
+        MSM="$CONFIG_DIR/kernel_platform/msm-kernel"
         OUT="$MSM/out"
         MODULES_SRC="$OUT/modules"
         MODULES_ZIP="$CONFIG_DIR/artifacts/kernel_modules_${{ env.OP_MODEL }}.zip"
         mkdir -p "$CONFIG_DIR/artifacts"
         find "$MODULES_SRC" -type f -name '*.ko' -print0 | xargs -0 zip -j "$MODULES_ZIP"
-        echo "Packaged kernel modules to $MODULES_ZIP"
 
     - name: Final Build Summary
       shell: bash
       run: |
         set -euo pipefail
-        {
-          echo "CCache Statistics :"
-          echo "$(/usr/bin/ccache -s)"
-        } | tee summary.txt
-        {
-          echo "### Kernel Modules Build Summary"
-          echo ""
-          echo "CCache Statistics :"
-          echo "$(ccache -s -v)"
-        } >> "$GITHUB_STEP_SUMMARY"
+        echo "### Kernel Modules Build Summary" >> "$GITHUB_STEP_SUMMARY"
+        echo "$(ccache -s -v)" >> "$GITHUB_STEP_SUMMARY"
 
     - name: Cleanup old ccache
       shell: bash
       run: |
         set -euo pipefail
-        echo "Deleting old ccache..."
         gh cache delete ccache-${{ env.CONFIG }}-modules-${{ env.KERNEL_FULL_VER }}- || true
 
     - name: Upload Kernel Modules zip
