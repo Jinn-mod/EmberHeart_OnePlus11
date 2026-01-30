@@ -21,7 +21,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # --- STEP 1: FREE UP SPACE (Safety ke liye) ---
+    # --- STEP 1: FREE UP SPACE ---
     - name: Free Disk Space (Ubuntu)
       shell: bash
       run: |
@@ -68,7 +68,6 @@ runs:
         set -euo pipefail
         echo "::group::Install deps"
         sudo apt-get -o Acquire::Retries=3 update -qq
-        # GCC Aarch64 zaroori hai cross-compilation ke liye
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
           git curl ca-certificates build-essential clang lld flex bison \
           libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool \
@@ -220,6 +219,10 @@ runs:
         CONFIG_IP_SET_HASH_NETPORT=m
         CONFIG_IP_SET_HASH_NETIFACE=m
         CONFIG_IP_SET_LIST_SET=m
+        
+        # --- FIX FOR STACK FRAME SIZE ERROR ---
+        CONFIG_FRAME_WARN=0
+        # --------------------------------------
         EOF
 
     - name: Add memkernel module
@@ -270,7 +273,7 @@ runs:
         FIX_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         cd "$FIX_DIR"
         
-        # FIX 1: Convert current_stack_pointer to MACRO (Solves Duplicate Symbol Error)
+        # FIX 1: stack_pointer.h (Macro Fix - Keeps Duplicate Symbols Away)
         echo "Fixing stack_pointer.h with Macro..."
         find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/#define current_stack_pointer ({ unsigned long sp; asm volatile("mov %0, sp" : "=r" (sp)); sp; })/' {} +
         
@@ -306,7 +309,7 @@ runs:
         echo "Building kernel modules..."
         make ARCH=arm64 LLVM=1 O=out olddefconfig
         
-        # CROSS_COMPILE + GCC Dependencies (Solves Unknown Register Error)
+        # CROSS_COMPILE + GCC Dependencies
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
