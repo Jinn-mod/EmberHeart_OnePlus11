@@ -279,9 +279,13 @@ runs:
         echo "Fixing kgdb.h..."
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
         
-        # FIX 3: vmscan.c (Injecting variable declaration for undeclared bug)
+        # FIX 3: vmscan.c (Injecting variable declaration)
         echo "Fixing vmscan.c missing variable..."
         sed -i 's/scan_adjusted = (!cgroup_reclaim/bool scan_adjusted = (!cgroup_reclaim/' mm/vmscan.c
+        
+        # FIX 4: thermal_sysfs.c (Missing header for kvzalloc)
+        echo "Fixing thermal_sysfs.c missing header..."
+        sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
         
         echo ">>> FIXES APPLIED SUCCESSFULLY!"
         # --- NUCLEAR FIX END ---
