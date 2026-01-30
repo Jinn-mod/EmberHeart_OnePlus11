@@ -21,7 +21,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # --- STEP 1: STORAGE CLEANUP (Safety First) ---
+    # --- STEP 1: STORAGE CLEANUP ---
     - name: Free Disk Space (Ubuntu)
       shell: bash
       run: |
@@ -68,7 +68,6 @@ runs:
         set -euo pipefail
         echo "::group::Install deps"
         sudo apt-get -o Acquire::Retries=3 update -qq
-        # GCC Aarch64 is REQUIRED for Cross Compilation
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
           git curl ca-certificates build-essential clang lld flex bison \
           libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool \
@@ -221,9 +220,9 @@ runs:
         CONFIG_IP_SET_HASH_NETIFACE=m
         CONFIG_IP_SET_LIST_SET=m
         
-        # --- FIX FRAME SIZE ERROR ---
+        # --- CONFIG FIXES ---
         CONFIG_FRAME_WARN=0
-        # ----------------------------
+        # --------------------
         EOF
 
     - name: Add memkernel module
@@ -274,12 +273,16 @@ runs:
         FIX_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         cd "$FIX_DIR"
         
-        # FIX 1: stack_pointer.h - NO EDIT (Disabling LTO is the real fix)
+        # FIX 1: stack_pointer.h - NO EDIT (LTO disabled handles this)
         echo "Skipping stack_pointer.h edits (Relying on disabling LTO)..."
         
         # FIX 2: kgdb.h (Break error fix)
         echo "Fixing kgdb.h..."
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
+        
+        # FIX 3: vmscan.c (Injecting missing variable declaration)
+        echo "Fixing vmscan.c missing variable..."
+        sed -i 's/scan_adjusted = (!cgroup_reclaim/bool scan_adjusted = (!cgroup_reclaim/' mm/vmscan.c
         
         echo ">>> FIXES APPLIED SUCCESSFULLY!"
         # --- NUCLEAR FIX END ---
@@ -299,7 +302,6 @@ runs:
         ./scripts/kconfig/merge_config.sh -O "$OUT" -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${OP_SOC}_GKI.config
 
         # --- DISABLE ALL LTO OPTIONS TO FIX DUPLICATE SYMBOLS ---
-        # This is the MAGIC part that will fix Run #17 & #20 error
         ./scripts/config --file "$OUT/.config" \
             --disable CONFIG_LTO \
             --disable CONFIG_LTO_CLANG \
