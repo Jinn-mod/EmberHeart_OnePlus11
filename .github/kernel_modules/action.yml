@@ -1,4 +1,4 @@
-name: Build OnePlus kernel modules (NetHunter Fix)
+name: Build OnePlus kernel modules (Force Strike)
 
 permissions:
   contents: write
@@ -16,24 +16,17 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Cleanup and Free Space
+    - name: Cleanup Space
       shell: bash
       run: |
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo apt-get clean
-        df -h
 
-    - name: Parse Config
-      shell: bash
-      run: |
-        echo '${{ inputs.op_config_json }}' > /tmp/config.json
-        jq -r 'to_entries[] | "OP_\(.key | ascii_upcase)=\(.value)"' /tmp/config.json >> "$GITHUB_ENV"
-
-    - name: Install Dependencies
+    - name: Install Essential Deps (Fast)
       shell: bash
       run: |
         sudo apt-get update -qq
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        sudo apt-get install -y --no-install-recommends \
           git curl build-essential clang lld flex bison libelf-dev libssl-dev \
           liblz4-tool libxml2-utils rsync unzip dwarves python3 ccache \
           gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
@@ -41,51 +34,50 @@ runs:
     - name: Sync Kernel Source
       shell: bash
       run: |
-        CONFIG="$OP_MODEL"
-        echo "CONFIG=$CONFIG" >> "$GITHUB_ENV"
+        set -euo pipefail
+        echo '${{ inputs.op_config_json }}' > /tmp/config.json
+        MODEL=$(jq -r '.model' /tmp/config.json)
+        SOC=$(jq -r '.soc' /tmp/config.json)
+        BRANCH=$(jq -r '.branch' /tmp/config.json)
+        echo "CONFIG=$MODEL" >> "$GITHUB_ENV"
+        echo "SOC=$SOC" >> "$GITHUB_ENV"
+        
         REPO="/usr/local/bin/repo"
         [ ! -x "$REPO" ] && curl -s https://storage.googleapis.com/git-repo-downloads/repo -o "$REPO" && chmod +x "$REPO"
-        mkdir -p "$CONFIG" && cd "$CONFIG"
-        "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$OP_BRANCH" -m "OP10-Pro_OOS15_MODULES" --depth=1
+        mkdir -p "$MODEL" && cd "$MODEL"
+        "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$BRANCH" -m "OP10-Pro_OOS15_MODULES" --depth=1
         "$REPO" sync -c -j$(nproc --all) --no-clone-bundle --no-tags
 
-    - name: Inject Ember's Driver & Hacking Configs
+    - name: Add Ember's WiFi & Hacking Configs
       shell: bash
       run: |
         cd "$CONFIG/kernel_platform/msm-kernel"
+        # 1. RTL8188EU (Ember's Fix)
+        git clone --depth=1 https://github.com/ivanovborislav/rtl8188eu.git drivers/net/wireless/rtl8188eu
+        echo "obj-m += rtl8188eu/" >> drivers/net/wireless/Makefile
         
-        # 1. Add RTL8188EU (Ember's suggestion)
-        cd drivers/net/wireless
-        git clone --depth=1 https://github.com/ivanovborislav/rtl8188eu.git rtl8188eu
-        echo "obj-m += rtl8188eu/" >> Makefile
-        cd ../../../
-        
-        # 2. Inject NetHunter Config Flags into gki_defconfig
+        # 2. Hacking Flags (BBR, TTL, IPSET)
         cat >> arch/arm64/configs/gki_defconfig <<EOF
         CONFIG_MODULES=y
-        CONFIG_NET_VENDOR_REALTEK=y
         CONFIG_RTL8188EU=m
-        CONFIG_USB_NET_DRIVERS=y
-        CONFIG_WLAN_VENDOR_REALTEK=y
-        CONFIG_RTW88=n
         CONFIG_TCP_CONG_BBR=y
         CONFIG_NETFILTER_XT_TARGET_TTL=m
         CONFIG_IP_SET=m
+        CONFIG_NETFILTER_XT_MATCH_HL=m
         EOF
 
-    - name: Add MemKernel (KernelSU/SUSFS)
+    - name: Add MemKernel (Root/KSU)
       shell: bash
       run: |
         cd "$CONFIG/kernel_platform/msm-kernel"
         curl -LSs "https://raw.githubusercontent.com/Poko-Apps/MemKernel/main/kernel/setup.sh" | bash -s M br0k3n
 
-    - name: Build Modules with Ultimate Bypass
+    - name: Build Modules (Ultimate Override)
       shell: bash
       run: |
-        FIX_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
-        cd "$FIX_DIR"
+        cd "$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         
-        # Mandatory Source Fixes
+        # Mandatory Patching
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0"/\/\/ asm ("brk %0"/' {} +
         sed -i 's/scan_adjusted =/bool scan_adjusted =/' mm/vmscan.c
@@ -94,26 +86,26 @@ runs:
         export PATH="$(ls -d $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r* | tail -1)/bin:$PATH"
         
         make ARCH=arm64 O=$OUT LLVM=1 mrproper
-        ./scripts/kconfig/merge_config.sh -O $OUT -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${OP_SOC}_GKI.config
+        ./scripts/kconfig/merge_config.sh -O $OUT -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${SOC}_GKI.config
         
-        # Disable LTO to prevent build crashes
+        # Linker Fix (Disable LTO to prevent 28min crash)
         ./scripts/config --file "$OUT/.config" --disable CONFIG_LTO_CLANG_THIN --disable CONFIG_LTO_CLANG_FULL
         
-        # The Golden Command: -Wno-error will bypass ALL non-fatal bugs
+        # Build with NO-ERROR
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=$OUT CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            KCFLAGS="-Wno-error -Wno-macro-redefined -Wno-declaration-after-statement -fno-stack-protector" \
+            KCFLAGS="-Wno-error -Wno-macro-redefined -Wno-declaration-after-statement" \
             modules
 
-        # Zip all created .ko files
+        # Final Collection
         mkdir -p artifacts
         find $OUT -name "*.ko" -exec cp {} artifacts/ \;
         cd artifacts && zip -r ../kernel_modules_jinn.zip .
 
-    - name: Upload Kernel Modules
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-modules-final
+        name: jinn-modules-op10
         path: ${{ env.CONFIG }}/kernel_platform/msm-kernel/kernel_modules_jinn.zip
         
