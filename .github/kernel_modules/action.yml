@@ -284,11 +284,10 @@ runs:
         sed -i 's/scan_adjusted = (!cgroup_reclaim/bool scan_adjusted = (!cgroup_reclaim/' mm/vmscan.c
         
         # FIX 4: thermal_sysfs.c (Injecting Header AND Undefining macro)
-        # 1. Include header first
-        # 2. Undefine pr_fmt before redefine to avoid error
-        echo "Fixing thermal_sysfs.c macro redefinition..."
+        # This time using a regex that catches line starting with #define
+        echo "Fixing thermal_sysfs.c macro redefinition and header..."
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
-        sed -i '/#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt/i #undef pr_fmt' drivers/thermal/thermal_sysfs.c
+        sed -i '/^#define pr_fmt/i #undef pr_fmt' drivers/thermal/thermal_sysfs.c
         
         echo ">>> FIXES APPLIED SUCCESSFULLY!"
         # --- NUCLEAR FIX END ---
