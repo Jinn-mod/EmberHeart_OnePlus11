@@ -272,7 +272,7 @@ runs:
         FIX_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         cd "$FIX_DIR"
         
-        # FIX 1: stack_pointer.h (LTO disabled handles this)
+        # FIX 1: Skipping stack_pointer.h edit (LTO disabled handles this)
         echo "Skipping stack_pointer.h edits (Relying on disabling LTO)..."
         
         # FIX 2: kgdb.h (Break error fix)
@@ -283,11 +283,10 @@ runs:
         echo "Fixing vmscan.c missing variable..."
         sed -i 's/scan_adjusted = (!cgroup_reclaim/bool scan_adjusted = (!cgroup_reclaim/' mm/vmscan.c
         
-        # FIX 4: thermal_sysfs.c (Injecting Header AND Undefining macro)
-        echo "Fixing thermal_sysfs.c macro redefinition and header..."
+        # FIX 4: thermal_sysfs.c (Injecting Header ONLY)
+        # Note: pr_fmt redefine error is now handled by KCFLAGS below
+        echo "Fixing thermal_sysfs.c missing header..."
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
-        # Note: Removing '^' anchor to match line even if it has indentation
-        sed -i '/define pr_fmt/i #undef pr_fmt' drivers/thermal/thermal_sysfs.c
         
         echo ">>> FIXES APPLIED SUCCESSFULLY!"
         # --- NUCLEAR FIX END ---
@@ -321,12 +320,15 @@ runs:
         echo "Building kernel modules..."
         make ARCH=arm64 LLVM=1 O=out olddefconfig
         
-        # ADDED KCFLAGS TO IGNORE C90 AND UNUSED VAR ERRORS
+        # ADDED KCFLAGS:
+        # -Wno-declaration-after-statement: Fixes vmscan.c mix declaration
+        # -Wno-unused-variable: Fixes unused var warnings
+        # -Wno-macro-redefined: FIXES THE pr_fmt ERROR PERMANENTLY
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            KCFLAGS="-Wno-declaration-after-statement -Wno-unused-variable" \
+            KCFLAGS="-Wno-declaration-after-statement -Wno-unused-variable -Wno-macro-redefined" \
             modules        
         
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out INSTALL_MOD_PATH=$INSTALL_MOD_PATH modules_install
