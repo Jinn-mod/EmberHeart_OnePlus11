@@ -21,6 +21,7 @@ inputs:
 runs:
   using: composite
   steps:
+    # --- STEP 1: STORAGE CLEANUP (Safety First) ---
     - name: Free Disk Space (Ubuntu)
       shell: bash
       run: |
@@ -67,7 +68,7 @@ runs:
         set -euo pipefail
         echo "::group::Install deps"
         sudo apt-get -o Acquire::Retries=3 update -qq
-        # Installing Cross Compilers
+        # GCC Aarch64 is REQUIRED for Cross Compilation
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
           git curl ca-certificates build-essential clang lld flex bison \
           libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool \
@@ -273,16 +274,8 @@ runs:
         FIX_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         cd "$FIX_DIR"
         
-        # FIX 1: FORCE OVERWRITE stack_pointer.h (Deleting old, writing new)
-        echo "Forcing stack_pointer.h overwrite..."
-        rm -f arch/arm64/include/asm/stack_pointer.h
-        cat > arch/arm64/include/asm/stack_pointer.h <<EOF
-        #ifndef __ASM_STACK_POINTER_H
-        #define __ASM_STACK_POINTER_H
-        #include <asm/ptrace.h>
-        #define current_stack_pointer ({ unsigned long sp; asm volatile("mov %0, sp" : "=r" (sp)); sp; })
-        #endif
-        EOF
+        # FIX 1: stack_pointer.h - NO EDIT (Disabling LTO is the real fix)
+        echo "Skipping stack_pointer.h edits (Relying on disabling LTO)..."
         
         # FIX 2: kgdb.h (Break error fix)
         echo "Fixing kgdb.h..."
@@ -305,9 +298,14 @@ runs:
 
         ./scripts/kconfig/merge_config.sh -O "$OUT" -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${OP_SOC}_GKI.config
 
+        # --- DISABLE ALL LTO OPTIONS TO FIX DUPLICATE SYMBOLS ---
+        # This is the MAGIC part that will fix Run #17 & #20 error
         ./scripts/config --file "$OUT/.config" \
-            --enable CONFIG_LTO_CLANG_THIN \
-            --enable CONFIG_LTO_CLANG \
+            --disable CONFIG_LTO \
+            --disable CONFIG_LTO_CLANG \
+            --disable CONFIG_LTO_CLANG_THIN \
+            --disable CONFIG_LTO_CLANG_FULL \
+            --disable CONFIG_THINLTO \
             --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE \
             --disable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
 
