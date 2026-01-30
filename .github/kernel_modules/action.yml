@@ -21,7 +21,6 @@ inputs:
 runs:
   using: composite
   steps:
-    # --- STEP 1: STORAGE CLEANUP ---
     - name: Free Disk Space (Ubuntu)
       shell: bash
       run: |
@@ -280,7 +279,7 @@ runs:
         echo "Fixing kgdb.h..."
         find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
         
-        # FIX 3: vmscan.c (Injecting missing variable declaration)
+        # FIX 3: vmscan.c (Injecting variable declaration for undeclared bug)
         echo "Fixing vmscan.c missing variable..."
         sed -i 's/scan_adjusted = (!cgroup_reclaim/bool scan_adjusted = (!cgroup_reclaim/' mm/vmscan.c
         
@@ -301,7 +300,7 @@ runs:
 
         ./scripts/kconfig/merge_config.sh -O "$OUT" -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${OP_SOC}_GKI.config
 
-        # --- DISABLE ALL LTO OPTIONS TO FIX DUPLICATE SYMBOLS ---
+        # --- DISABLE LTO ---
         ./scripts/config --file "$OUT/.config" \
             --disable CONFIG_LTO \
             --disable CONFIG_LTO_CLANG \
@@ -316,11 +315,12 @@ runs:
         echo "Building kernel modules..."
         make ARCH=arm64 LLVM=1 O=out olddefconfig
         
-        # CROSS_COMPILE + GCC Dependencies
+        # ADDED KCFLAGS TO IGNORE C90 AND UNUSED VAR ERRORS
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            KCFLAGS="-Wno-declaration-after-statement -Wno-unused-variable" \
             modules        
         
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out INSTALL_MOD_PATH=$INSTALL_MOD_PATH modules_install
