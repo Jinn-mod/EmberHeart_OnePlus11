@@ -286,7 +286,7 @@ runs:
         # FIX 4: thermal_sysfs.c (Injecting Header AND Undefining macro)
         echo "Fixing thermal_sysfs.c macro redefinition and header..."
         sed -i '1i #include <linux/mm.h>' drivers/thermal/thermal_sysfs.c
-        # Removing '^' to match line even if it has spaces/tabs
+        # Note: Removing '^' anchor to match line even if it has indentation
         sed -i '/define pr_fmt/i #undef pr_fmt' drivers/thermal/thermal_sysfs.c
         
         echo ">>> FIXES APPLIED SUCCESSFULLY!"
