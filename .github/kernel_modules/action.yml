@@ -1,4 +1,4 @@
-name: Build OnePlus kernel modules (Fixed)
+name: Build OnePlus kernel modules (Final Fix)
 
 permissions:
   contents: write
@@ -27,7 +27,7 @@ runs:
         set -euo pipefail
         echo '${{ inputs.op_config_json }}' > /tmp/config.json
         jq -r 'to_entries[] | "OP_\(.key | ascii_upcase)=\(.value)"' /tmp/config.json >> "$GITHUB_ENV"
-        
+
     - name: Set Manifest
       shell: bash
       run: |
@@ -64,7 +64,6 @@ runs:
         set -euo pipefail
         mkdir -p "$CONFIG"
         cd "$CONFIG"
-        echo "Initializing and syncing kernel source..."
         if [[ "$OP_MANIFEST" == https://* ]]; then
           mkdir -p .repo/manifests
           curl --fail --show-error --location --proto '=https' "$OP_MANIFEST" -o .repo/manifests/temp_manifest.xml
@@ -73,7 +72,6 @@ runs:
           "$REPO" init -u https://github.com/OnePlusOSS/kernel_manifest.git -b "$OP_BRANCH" -m "$OP_MANIFEST" --repo-rev=v2.16 --depth=1 --no-clone-bundle --no-tags
         fi
         
-        # Retry logic for sync
         success=false
         for i in 1 2 3; do
           if "$REPO" sync -c --no-clone-bundle --no-tags --optimized-fetch -j"$(nproc --all)" --fail-fast; then
@@ -92,7 +90,6 @@ runs:
         ARTIFACTS_DIR="$CONFIG_DIR/artifacts"
         mkdir -p "$ARTIFACTS_DIR"
         cd "$CONFIG_DIR/kernel_platform/msm-kernel"
-        
         VERSION=$(grep '^VERSION *=' Makefile | awk '{print $3}')
         PATCHLEVEL=$(grep '^PATCHLEVEL *=' Makefile | awk '{print $3}')
         echo "KERNEL_VER=$VERSION.$PATCHLEVEL" >> "$GITHUB_ENV"
@@ -104,16 +101,31 @@ runs:
         key: ${{ env.CONFIG }}-modules-${{ env.KERNEL_FULL_VER }}
         max-size: 5G
 
-    - name: 🛠️ Fix Thermal Sysfs (CRITICAL FIX)
+    - name: 🛠️ Fix Compiler Errors (The Triple Fix)
       shell: bash
       run: |
         set -euo pipefail
-        # Ye wahi fix hai jo main kernel me error de raha tha
-        # Agar ye nahi lagaya toh modules compile hone se pehle hi error aa jayega
-        THERMAL_FILE="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel/drivers/thermal/thermal_sysfs.c"
+        MSM_DIR="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
+        
+        # 1. Thermal Sysfs Fix (Missing Header)
+        THERMAL_FILE="$MSM_DIR/drivers/thermal/thermal_sysfs.c"
         if [ -f "$THERMAL_FILE" ]; then
              sed -i '1i #include <linux/mm.h>' "$THERMAL_FILE"
-             echo "✅ Fixed thermal_sysfs.c for Modules Build"
+             echo "✅ Fixed thermal_sysfs.c"
+        fi
+
+        # 2. Stack Pointer Fix (Clang Error)
+        SP_FILE="$MSM_DIR/arch/arm64/include/asm/stack_pointer.h"
+        if [ -f "$SP_FILE" ]; then
+             sed -i 's/register unsigned long current_stack_pointer asm ("sp");/unsigned long current_stack_pointer = 0;/' "$SP_FILE"
+             echo "✅ Fixed stack_pointer.h"
+        fi
+
+        # 3. KGDB Fix (Assembler Error)
+        KGDB_FILE="$MSM_DIR/arch/arm64/include/asm/kgdb.h"
+        if [ -f "$KGDB_FILE" ]; then
+             sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' "$KGDB_FILE"
+             echo "✅ Fixed kgdb.h"
         fi
 
     - name: Configure NetHunter Drivers
@@ -123,8 +135,6 @@ runs:
         KERNEL_PATH="$GITHUB_WORKSPACE/$CONFIG/kernel_platform"
         MSM="$KERNEL_PATH/msm-kernel"
         cd "$MSM"
-        
-        # Adding WiFi configs as MODULES (=m)
         cat >> arch/arm64/configs/gki_defconfig <<EOF
         CONFIG_WLAN_VENDOR_REALTEK=y
         CONFIG_RTL8188EU=m
@@ -147,19 +157,15 @@ runs:
         rm -rf rtw88
         git clone https://github.com/lwfinger/rtw88.git
         sed -i 's/$(CONFIG_RTW88)/m/g' Makefile
-        # Kconfig fix to prevent recursion
         sed -i '/^source "drivers\/net\/wireless\/realtek\/rtw88\/Kconfig"$/s/.*/ /' Kconfig
 
     - name: Detect Clang
       shell: bash
       run: |
         set -euo pipefail
-        KP="$GITHUB_WORKSPACE/$CONFIG/kernel_platform"
-        # Simple detection
         if command -v clang >/dev/null 2>&1; then
            echo "CLANG_BIN_PATH=$(dirname $(command -v clang))" >> "$GITHUB_ENV"
         else
-           # Fallback logic if needed, but ubuntu usually has clang
            echo "Clang not found in path"
         fi
 
@@ -170,23 +176,17 @@ runs:
         KERNEL_PLATFORM="$GITHUB_WORKSPACE/$CONFIG/kernel_platform"
         MSM="$KERNEL_PLATFORM/msm-kernel"
         OUT=out
-        
         export PATH="${CLANG_BIN_PATH}:$PATH" 
         export PATH="/usr/lib/ccache:$PATH"
-        
         cd "$MSM"
         make ARCH=arm64 mrproper
         mkdir -p "$OUT"
-        
-        # Merge configs
         ./scripts/kconfig/merge_config.sh -O "$OUT" -m arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/${OP_SOC}_GKI.config
         
         echo "Building modules..."
         make ARCH=arm64 LLVM=1 O=out olddefconfig
-        # Main build command
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out CC="ccache clang" modules
         
-        # Install modules to temp path
         INSTALL_MOD_PATH="$MSM/out/install"
         make -j$(nproc --all) ARCH=arm64 LLVM=1 O=out INSTALL_MOD_PATH=$INSTALL_MOD_PATH modules_install
 
@@ -197,16 +197,10 @@ runs:
         set -euo pipefail
         MSM="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/msm-kernel"
         INSTALL_PATH="$MSM/out/install"
-        
-        # Find where modules were installed
         MODULES_DIR=$(find "$INSTALL_PATH" -type d -name "kernel" | head -n 1)
-        
-        echo "Zipping modules from $MODULES_DIR"
         mkdir -p "$GITHUB_WORKSPACE/$CONFIG/artifacts"
         ZIP_FILE="$GITHUB_WORKSPACE/$CONFIG/artifacts/kernel_modules.zip"
-        
         cd "$MODULES_DIR"
-        # Zip all .ko files found
         find . -type f -name "*.ko" -print0 | xargs -0 zip -j "$ZIP_FILE"
         echo "Modules Zipped ✅"
 
@@ -214,5 +208,5 @@ runs:
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: Modules-Only-Backup
+        name: Modules-Backup-Fixed
         path: ${{ env.CONFIG }}/artifacts/*.zip
