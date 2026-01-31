@@ -1,12 +1,93 @@
-- name: 🔥 Build Kernel (Fixed Config Path)
+name: Build OnePlus EmberHeart Kernel (Final Jinn Edition)
+description: 'Full Repo Sync with fixed build config and drivers'
+
+inputs:
+  op_config_json:
+    description: 'JSON string containing full device config'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: ⚙️ Setup Environment
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Config variables set kar rahe hain
+        echo '${{ inputs.op_config_json }}' > /tmp/config.json
+        jq -r 'to_entries[] | "OP_\(.key | ascii_upcase)=\(.value)"' /tmp/config.json >> "$GITHUB_ENV"
+        
+        # Hardcoded values taaki galti na ho
+        echo "OP_MANIFEST=oneplus_10_pro_v.xml" >> "$GITHUB_ENV"
+        echo "CONFIG=OP10-Pro" >> "$GITHUB_ENV"
+        echo "WORKSPACE_DIR=${{ github.workspace }}/workspace" >> "$GITHUB_ENV"
+
+    - name: 📦 Install Dependencies
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y git curl build-essential clang lld flex bison \
+        libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool libxml2-utils \
+        rsync unzip dwarves file python3 ccache python3-pip
+
+        # Repo Tool (Google ka magic tool)
+        sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
+        sudo chmod +x /usr/local/bin/repo
+
+    - name: 🔄 Sync FULL Source (Manifest Way)
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p ${{ env.WORKSPACE_DIR }}
+        cd ${{ env.WORKSPACE_DIR }}
+        
+        echo "::group::Syncing via Manifest..."
+        # Ye command poora 15GB source code download karegi
+        repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b oneplus/sm8450 -m ${{ env.OP_MANIFEST }} --depth=1
+        repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+        echo "::endgroup::"
+
+    - name: 💉 Inject NetHunter (Built-in Mode)
       shell: bash
       run: |
         set -euo pipefail
         cd ${{ env.WORKSPACE_DIR }}/kernel_platform
         
-        echo "::group::Fixing Missing Config..."
-        # Error yahan tha: Script 'build.config' dhoondh raha tha par wo 'common' folder me tha
-        # Hum us file ko dhoondh kar bahar link kar rahe hain
+        echo "::group::Injecting Configs..."
+        # Saare configs dhoondh kar unme NetHunter features daal rahe hain
+        find common/arch/arm64/configs -name "gki_defconfig" -o -name "waipio_GKI.config" | while read config_file; do
+          echo "Patching: $config_file"
+          cat >> "$config_file" <<EOF
+        # NetHunter Configs by Jinn
+        CONFIG_USB_CONFIGFS_F_HID=y
+        CONFIG_USB_CONFIGFS_F_ACC=y
+        CONFIG_USB_CONFIGFS_UEVENT=y
+        CONFIG_USB_SERIAL=y
+        CONFIG_USB_SERIAL_CH341=y
+        CONFIG_R8188EU=y
+        CONFIG_RTL8188EU=y
+        CONFIG_IP_SET=y
+        CONFIG_TCP_CONG_BBR=y
+        CONFIG_LOCALVERSION="-NetHunter-Jinn"
+        EOF
+        done
+        
+        # Thermal Error Fix (Jo pichli baar aya tha)
+        THERMAL_FILE="msm-kernel/drivers/thermal/thermal_sysfs.c"
+        if [ -f "$THERMAL_FILE" ]; then
+             sed -i '1i #include <linux/mm.h>' "$THERMAL_FILE"
+             echo "✅ Fixed thermal_sysfs.c"
+        fi
+        echo "::endgroup::"
+
+    - name: 🔥 Build Kernel (Fixed Config Path)
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd ${{ env.WORKSPACE_DIR }}/kernel_platform
+        
+        echo "::group::Linking Config File..."
+        # Yahan hum script ko batayenge ki build.config kahan chhupa hai
         if [ -f "common/build.config.gki.aarch64" ]; then
             ln -sf common/build.config.gki.aarch64 build.config
             echo "Linked build.config.gki.aarch64 ✅"
@@ -14,16 +95,22 @@
             ln -sf common/build.config build.config
             echo "Linked common/build.config ✅"
         else
-            # Agar common me na mile toh msm-kernel me check karo
             ln -sf msm-kernel/build.config build.config
             echo "Linked msm-kernel/build.config ✅"
         fi
         echo "::endgroup::"
 
         echo "::group::Starting Build..."
-        # Ab script ko build.config mil jayega
-        # BUILD_CONFIG variable bhi set kar dete hain safety ke liye
+        # Ab build shuru hoga
         export BUILD_CONFIG=build.config
-        
         ./build/build.sh -c waipio_gki -t waipio_gki -a arm64 -v 5.10
         echo "::endgroup::"
+
+    - name: 📦 Collect Artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: Jinn-NetHunter-Final
+        path: |
+          ${{ env.WORKSPACE_DIR }}/out/**/Image
+          ${{ env.WORKSPACE_DIR }}/out/**/boot.img
