@@ -110,16 +110,14 @@ jobs:
     name: Build ${{ matrix.model }} NetHunter Kernel
     needs: set-op-model
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.set-op-model.outputs.matrix) }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
-      KCFLAGS: "-Wno-error -Wno-unused-variable -Wno-frame-larger-than= -Wno-single-bit-bitfield-constant-conversion"
-
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.set-op-model.outputs.matrix) }}
     steps:
       - name: ☢️ Storage Nuke (Free Disk Space)
         run: |
@@ -136,11 +134,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bc bison build-essential curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip clang lld llvm
-
       - name: Fix Source Code Errors
         run: |
           echo "Fixing stack_pointer.h..."
@@ -148,58 +141,44 @@ jobs:
           echo "Fixing kgdb.h..."
           find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
 
-      - name: Configure and Inject NetHunter Features
+      # 👇 ASLI FIX: Hum Ember ka system use karenge, bas config pehle badal denge
+      - name: 💉 Inject NetHunter Features (Pre-Build)
         run: |
-          export ARCH=arm64
-          export CC=clang
-          export LLVM=1
-          
-          # Base Config
-          make O=out olddefconfig
+          echo "Searching for config files to inject NetHunter features..."
+          # Hum 'arch/arm64/configs' me jitne bhi config files hain sabme append karenge
+          find arch/arm64/configs -name "*defconfig" -o -name "*.config" | while read config_file; do
+            echo "💉 Injecting into: $config_file"
+            echo "" >> "$config_file"
+            echo "# --- NetHunter Injection by Jinn ---" >> "$config_file"
+            echo "CONFIG_USB_CONFIGFS_F_HID=y" >> "$config_file"
+            echo "CONFIG_USB_CONFIGFS_F_ACC=y" >> "$config_file"
+            echo "CONFIG_USB_CONFIGFS_UEVENT=y" >> "$config_file"
+            echo "CONFIG_MAC80211=y" >> "$config_file"
+            echo "CONFIG_MAC80211_LEDS=y" >> "$config_file"
+            echo "CONFIG_MAC80211_MESH=y" >> "$config_file"
+            echo "CONFIG_CDROM=y" >> "$config_file"
+            # External WiFi Drivers (Staging)
+            echo "CONFIG_STAGING=y" >> "$config_file"
+            echo "CONFIG_R8188EU=y" >> "$config_file"
+            echo "CONFIG_RTL8188EU=y" >> "$config_file"
+            # IP Set & TTL
+            echo "CONFIG_IP_SET=y" >> "$config_file"
+            echo "CONFIG_NETFILTER_XT_TARGET_HL=y" >> "$config_file"
+            echo "CONFIG_NETFILTER_XT_MATCH_HL=y" >> "$config_file"
+            echo "CONFIG_LOCALVERSION=\"-NetHunter-Jinn\"" >> "$config_file"
+          done
+          echo "✅ Injection Complete!"
 
-          echo "💉 Injecting NetHunter Features into Kernel Image..."
-          cd out
-          
-          # --- NetHunter HID, WiFi Injection & CDROM ---
-          ../scripts/config --file .config \
-              --enable CONFIG_USB_CONFIGFS_F_HID \
-              --enable CONFIG_USB_CONFIGFS_F_ACC \
-              --enable CONFIG_USB_CONFIGFS_UEVENT \
-              --enable CONFIG_MAC80211 \
-              --enable CONFIG_MAC80211_LEDS \
-              --enable CONFIG_MAC80211_MESH \
-              --enable CONFIG_CDROM
-
-          # --- RTL8188EU Driver (Built-in) ---
-          ../scripts/config --file .config \
-              --enable CONFIG_STAGING \
-              --enable CONFIG_R8188EU \
-              --enable CONFIG_RTL8188EU 
-
-          # --- IP Set & TTL ---
-          ../scripts/config --file .config \
-              --enable CONFIG_IP_SET \
-              --enable CONFIG_NETFILTER_XT_TARGET_HL \
-              --enable CONFIG_NETFILTER_XT_MATCH_HL
-
-          # --- Branding ---
-          ../scripts/config --file .config --set-str CONFIG_LOCALVERSION "-NetHunter-Jinn"
-          cd ..
-
-      - name: Build Kernel Image
-        run: |
-          export ARCH=arm64
-          export CC=clang
-          export LLVM=1
-          export LLVM_IAS=1
-          
-          make -j$(nproc --all) O=out Image
-
-      - name: Upload Kernel Image
-        uses: actions/upload-artifact@v4
+      # 👇 WAPAS ORIGINAL METHOD PAR (Jo Green hota tha)
+      - name: Build Kernel (Original Method)
+        uses: ./.github/actions
         with:
-          name: Image-${{ matrix.model }}
-          path: out/arch/arm64/boot/Image
+          op_config_json: ${{ toJSON(matrix) }}
+          ksun_branch_or_hash: ${{ inputs.ksun_branch }}
+          susfs_commit_hash_or_branch: ${{ inputs.susfs_branch_or_commit }}
+          optimize_level: ${{ inputs.optimize_level }}
+          kernel_uname: ${{ inputs.kernel_uname }}
+          manifest: ${{ inputs.manifest }}
 
   trigger-release:
     needs:
@@ -223,7 +202,7 @@ jobs:
           if [ -z "$DEVICE" ]; then
              DEVICE="${{ inputs.model }}"
           fi
-          RELEASE_NAME="$DEVICE EmberHeart NetHunter Kernel (Manual Build)"
+          RELEASE_NAME="$DEVICE EmberHeart NetHunter Kernel"
           echo "RELEASE_NAME=$RELEASE_NAME" >> "$GITHUB_ENV"
 
       - name: Generate and Create New Tag
@@ -252,13 +231,13 @@ jobs:
           tag_name: ${{ env.NEW_TAG }}
           name: ${{ env.RELEASE_NAME }}
           body: |
-            ### 🛠️ NetHunter Kernel Build
+            ### 🛠️ NetHunter Kernel Build (Auto-Injected)
             **Features:**
             - KernelSU & SUSFS
             - HID Support (BadUSB)
             - External WiFi Injection (RTL8188EU Built-in)
             
-            ⚠️ **Note:** This is a raw Image file. Please manually replace the `Image` file inside your AK3 Zip and flash.
+            ⚠️ **Flash Info:** This build uses the EmberHeart build system. Flash the zip as normal.
           files: |
             downloaded-artifacts/**/*
             
