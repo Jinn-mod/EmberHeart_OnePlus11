@@ -1,5 +1,5 @@
-name: Build OnePlus EmberHeart Kernel (Final Jinn Edition)
-description: 'Full Repo Sync with fixed build config and drivers'
+name: Build OnePlus EmberHeart Kernel (Ultimate Fix)
+description: 'Full Repo Sync with ALL compiler patches'
 
 inputs:
   op_config_json:
@@ -13,11 +13,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Config variables set kar rahe hain
         echo '${{ inputs.op_config_json }}' > /tmp/config.json
         jq -r 'to_entries[] | "OP_\(.key | ascii_upcase)=\(.value)"' /tmp/config.json >> "$GITHUB_ENV"
-        
-        # Hardcoded values taaki galti na ho
         echo "OP_MANIFEST=oneplus_10_pro_v.xml" >> "$GITHUB_ENV"
         echo "CONFIG=OP10-Pro" >> "$GITHUB_ENV"
         echo "WORKSPACE_DIR=${{ github.workspace }}/workspace" >> "$GITHUB_ENV"
@@ -30,11 +27,11 @@ runs:
         libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool libxml2-utils \
         rsync unzip dwarves file python3 ccache python3-pip
 
-        # Repo Tool (Google ka magic tool)
+        # Repo Tool
         sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
         sudo chmod +x /usr/local/bin/repo
 
-    - name: 🔄 Sync FULL Source (Manifest Way)
+    - name: 🔄 Sync FULL Source
       shell: bash
       run: |
         set -euo pipefail
@@ -42,23 +39,20 @@ runs:
         cd ${{ env.WORKSPACE_DIR }}
         
         echo "::group::Syncing via Manifest..."
-        # Ye command poora 15GB source code download karegi
         repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b oneplus/sm8450 -m ${{ env.OP_MANIFEST }} --depth=1
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
         echo "::endgroup::"
 
-    - name: 💉 Inject NetHunter (Built-in Mode)
+    - name: 💉 Inject NetHunter & Fix Compiler Errors
       shell: bash
       run: |
         set -euo pipefail
         cd ${{ env.WORKSPACE_DIR }}/kernel_platform
         
         echo "::group::Injecting Configs..."
-        # Saare configs dhoondh kar unme NetHunter features daal rahe hain
         find common/arch/arm64/configs -name "gki_defconfig" -o -name "waipio_GKI.config" | while read config_file; do
           echo "Patching: $config_file"
           cat >> "$config_file" <<EOF
-        # NetHunter Configs by Jinn
         CONFIG_USB_CONFIGFS_F_HID=y
         CONFIG_USB_CONFIGFS_F_ACC=y
         CONFIG_USB_CONFIGFS_UEVENT=y
@@ -71,37 +65,49 @@ runs:
         CONFIG_LOCALVERSION="-NetHunter-Jinn"
         EOF
         done
-        
-        # Thermal Error Fix (Jo pichli baar aya tha)
-        THERMAL_FILE="msm-kernel/drivers/thermal/thermal_sysfs.c"
-        if [ -f "$THERMAL_FILE" ]; then
-             sed -i '1i #include <linux/mm.h>' "$THERMAL_FILE"
+        echo "::endgroup::"
+
+        echo "::group::Applying CRITICAL FIXES..."
+        MSM_DIR="msm-kernel"
+
+        # 1. Thermal Fix (Header missing)
+        if [ -f "$MSM_DIR/drivers/thermal/thermal_sysfs.c" ]; then
+             sed -i '1i #include <linux/mm.h>' "$MSM_DIR/drivers/thermal/thermal_sysfs.c"
              echo "✅ Fixed thermal_sysfs.c"
+        fi
+
+        # 2. Stack Pointer Fix (Error: register 'sp' unsuitable)
+        SP_FILE="$MSM_DIR/arch/arm64/include/asm/stack_pointer.h"
+        if [ -f "$SP_FILE" ]; then
+             sed -i 's/register unsigned long current_stack_pointer asm ("sp");/unsigned long current_stack_pointer = 0;/' "$SP_FILE"
+             echo "✅ Fixed stack_pointer.h"
+        fi
+
+        # 3. KGDB Fix (Error: value '1025' out of range)
+        KGDB_FILE="$MSM_DIR/arch/arm64/include/asm/kgdb.h"
+        if [ -f "$KGDB_FILE" ]; then
+             sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' "$KGDB_FILE"
+             echo "✅ Fixed kgdb.h"
         fi
         echo "::endgroup::"
 
-    - name: 🔥 Build Kernel (Fixed Config Path)
+    - name: 🔥 Build Kernel
       shell: bash
       run: |
         set -euo pipefail
         cd ${{ env.WORKSPACE_DIR }}/kernel_platform
         
-        echo "::group::Linking Config File..."
-        # Yahan hum script ko batayenge ki build.config kahan chhupa hai
+        echo "::group::Linking Build Config..."
         if [ -f "common/build.config.gki.aarch64" ]; then
             ln -sf common/build.config.gki.aarch64 build.config
-            echo "Linked build.config.gki.aarch64 ✅"
         elif [ -f "common/build.config" ]; then
             ln -sf common/build.config build.config
-            echo "Linked common/build.config ✅"
         else
             ln -sf msm-kernel/build.config build.config
-            echo "Linked msm-kernel/build.config ✅"
         fi
         echo "::endgroup::"
 
         echo "::group::Starting Build..."
-        # Ab build shuru hoga
         export BUILD_CONFIG=build.config
         ./build/build.sh -c waipio_gki -t waipio_gki -a arm64 -v 5.10
         echo "::endgroup::"
