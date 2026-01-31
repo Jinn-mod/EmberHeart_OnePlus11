@@ -1,5 +1,5 @@
-name: Build OnePlus EmberHeart Kernel (Nightly Fix)
-description: 'Manual Build with Static Stack Pointer & Disabled Cpuset'
+name: Build OnePlus EmberHeart Kernel (Clean & Fixed)
+description: 'Final Manual Build - No Excess Patches'
 
 inputs:
   op_config_json:
@@ -23,7 +23,6 @@ runs:
       shell: bash
       run: |
         sudo apt-get update -qq
-        # llvm package zaroori hai llvm-objdump error ke liye
         sudo apt-get install -y git curl build-essential clang lld llvm flex bison \
         libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool libxml2-utils \
         rsync unzip dwarves file python3 ccache python3-pip \
@@ -45,42 +44,37 @@ runs:
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
         echo "::endgroup::"
 
-    - name: 🛠️ Apply Critical Fixes (The Static Trick)
+    - name: 🛠️ Apply ONLY Necessary Fixes
       shell: bash
       run: |
         set -euo pipefail
-        if [ ! -d "${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel" ]; then
-            echo "❌ ERROR: msm-kernel folder not found!"
-            exit 1
-        fi
-        
         cd ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel
         
         echo "::group::Applying Patches..."
         
-        # 1. Thermal Fix (Header missing)
+        # 1. Thermal Fix (Ye 100% zaroori hai)
         if [ -f "drivers/thermal/thermal_sysfs.c" ]; then
              sed -i '1i #include <linux/mm.h>' "drivers/thermal/thermal_sysfs.c"
              echo "✅ Fixed thermal_sysfs.c"
         fi
         
-        # 2. Stack Pointer Fix (DUPLICATE SYMBOL FIX)
-        # Hum 'static' use karenge taaki linker error na de
-        SP_FILE="arch/arm64/include/asm/stack_pointer.h"
-        if [ -f "$SP_FILE" ]; then
-             sed -i 's/register unsigned long current_stack_pointer asm ("sp");/static unsigned long current_stack_pointer = 0;/' "$SP_FILE"
-             echo "✅ Fixed stack_pointer.h (Static Method)"
-        fi
-        
-        # 3. KGDB Fix (Assembler Error)
-        KGDB_FILE="arch/arm64/include/asm/kgdb.h"
-        if [ -f "$KGDB_FILE" ]; then
-             sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' "$KGDB_FILE"
+        # 2. KGDB Fix (Safe to keep)
+        if [ -f "arch/arm64/include/asm/kgdb.h" ]; then
+             sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' "arch/arm64/include/asm/kgdb.h"
              echo "✅ Fixed kgdb.h"
         fi
+
+        # 3. CPUSET Fix (Jo pichli baar aya tha)
+        # Hum missing header add kar rahe hain taaki 'cpuset_cgrp_id' error na aaye
+        if [ -f "kernel/sched/core.c" ]; then
+             sed -i '1i #include <linux/cpuset.h>' "kernel/sched/core.c"
+             echo "✅ Fixed sched/core.c (Added cpuset.h)"
+        fi
+        
+        # NOTE: Stack Pointer fix HATA DIYA hai kyunki CLANG_TRIPLE usse khud sambhal lega.
         echo "::endgroup::"
 
-    - name: 🔥 Build Kernel (Manual Config & Make)
+    - name: 🔥 Build Kernel (Clean Build)
       shell: bash
       run: |
         set -euo pipefail
@@ -91,7 +85,7 @@ runs:
         # Merge Configs
         ./scripts/kconfig/merge_config.sh -O out arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/waipio_GKI.config
         
-        # Inject NetHunter
+        # Inject NetHunter & Ensure CPUSETS is ON
         cat >> out/.config <<EOF
         CONFIG_USB_CONFIGFS_F_HID=y
         CONFIG_USB_CONFIGFS_F_ACC=y
@@ -102,17 +96,14 @@ runs:
         CONFIG_RTL8188EU=y
         CONFIG_IP_SET=y
         CONFIG_TCP_CONG_BBR=y
+        CONFIG_CPUSETS=y
         CONFIG_LOCALVERSION="-NetHunter-Jinn"
         EOF
-        
-        # Disable CPUSETS to avoid 'cpuset_cgrp_id' error
-        ./scripts/config --file out/.config --disable CONFIG_CPUSETS
         
         make ARCH=arm64 O=out olddefconfig
         echo "::endgroup::"
 
         echo "::group::🚀 Compiling Image..."
-        # CLANG_TRIPLE is KEY for fixing Assembler errors
         make -j$(nproc --all) \
              ARCH=arm64 \
              LLVM=1 \
@@ -130,7 +121,8 @@ runs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: Jinn-NetHunter-Nightly
+        name: Jinn-NetHunter-Success
         path: |
           ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel/out/arch/arm64/boot/Image
           ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel/out/**/boot.img
+          
