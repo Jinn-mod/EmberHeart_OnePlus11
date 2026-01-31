@@ -1,5 +1,5 @@
-name: Build OnePlus EmberHeart Kernel (Fixed Target)
-description: 'Manual Build with Fixed Compiler Target & Dependencies'
+name: Build OnePlus EmberHeart Kernel (Nightly Fix)
+description: 'Manual Build with Static Stack Pointer & Disabled Cpuset'
 
 inputs:
   op_config_json:
@@ -19,11 +19,11 @@ runs:
         echo "CONFIG=OP10-Pro" >> "$GITHUB_ENV"
         echo "WORKSPACE_DIR=${{ github.workspace }}/workspace" >> "$GITHUB_ENV"
 
-    - name: 📦 Install Dependencies (Fixed)
+    - name: 📦 Install Dependencies
       shell: bash
       run: |
         sudo apt-get update -qq
-        # Added 'llvm' and cross compilers explicitly
+        # llvm package zaroori hai llvm-objdump error ke liye
         sudo apt-get install -y git curl build-essential clang lld llvm flex bison \
         libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool libxml2-utils \
         rsync unzip dwarves file python3 ccache python3-pip \
@@ -45,7 +45,7 @@ runs:
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
         echo "::endgroup::"
 
-    - name: 🛠️ Apply Critical Fixes
+    - name: 🛠️ Apply Critical Fixes (The Static Trick)
       shell: bash
       run: |
         set -euo pipefail
@@ -57,18 +57,22 @@ runs:
         cd ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel
         
         echo "::group::Applying Patches..."
-        # Thermal Fix
+        
+        # 1. Thermal Fix (Header missing)
         if [ -f "drivers/thermal/thermal_sysfs.c" ]; then
              sed -i '1i #include <linux/mm.h>' "drivers/thermal/thermal_sysfs.c"
              echo "✅ Fixed thermal_sysfs.c"
         fi
-        # Stack Pointer Fix
+        
+        # 2. Stack Pointer Fix (DUPLICATE SYMBOL FIX)
+        # Hum 'static' use karenge taaki linker error na de
         SP_FILE="arch/arm64/include/asm/stack_pointer.h"
         if [ -f "$SP_FILE" ]; then
-             sed -i 's/register unsigned long current_stack_pointer asm ("sp");/unsigned long current_stack_pointer = 0;/' "$SP_FILE"
-             echo "✅ Fixed stack_pointer.h"
+             sed -i 's/register unsigned long current_stack_pointer asm ("sp");/static unsigned long current_stack_pointer = 0;/' "$SP_FILE"
+             echo "✅ Fixed stack_pointer.h (Static Method)"
         fi
-        # KGDB Fix
+        
+        # 3. KGDB Fix (Assembler Error)
         KGDB_FILE="arch/arm64/include/asm/kgdb.h"
         if [ -f "$KGDB_FILE" ]; then
              sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' "$KGDB_FILE"
@@ -76,7 +80,7 @@ runs:
         fi
         echo "::endgroup::"
 
-    - name: 🔥 Build Kernel (Corrected Target)
+    - name: 🔥 Build Kernel (Manual Config & Make)
       shell: bash
       run: |
         set -euo pipefail
@@ -101,11 +105,14 @@ runs:
         CONFIG_LOCALVERSION="-NetHunter-Jinn"
         EOF
         
+        # Disable CPUSETS to avoid 'cpuset_cgrp_id' error
+        ./scripts/config --file out/.config --disable CONFIG_CPUSETS
+        
         make ARCH=arm64 O=out olddefconfig
         echo "::endgroup::"
 
-        echo "::group::🚀 Compiling Image (With Fix)..."
-        # YAHAN HAI ASLI JADOO 👇
+        echo "::group::🚀 Compiling Image..."
+        # CLANG_TRIPLE is KEY for fixing Assembler errors
         make -j$(nproc --all) \
              ARCH=arm64 \
              LLVM=1 \
@@ -123,7 +130,7 @@ runs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: Jinn-NetHunter-FixedTarget
+        name: Jinn-NetHunter-Nightly
         path: |
           ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel/out/arch/arm64/boot/Image
           ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel/out/**/boot.img
