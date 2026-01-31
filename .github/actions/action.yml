@@ -1,5 +1,5 @@
-name: Build OnePlus EmberHeart Kernel (Ultimate Fix)
-description: 'Full Repo Sync with ALL compiler patches'
+name: Build OnePlus EmberHeart Kernel (Auto-Fix Config)
+description: 'Full Repo Sync with Auto-Discovery of Build Config'
 
 inputs:
   op_config_json:
@@ -43,7 +43,7 @@ runs:
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
         echo "::endgroup::"
 
-    - name: 💉 Inject NetHunter & Fix Compiler Errors
+    - name: 💉 Inject NetHunter & Fixes
       shell: bash
       run: |
         set -euo pipefail
@@ -65,49 +65,60 @@ runs:
         CONFIG_LOCALVERSION="-NetHunter-Jinn"
         EOF
         done
-        echo "::endgroup::"
 
-        echo "::group::Applying CRITICAL FIXES..."
+        # CRITICAL COMPILER FIXES
         MSM_DIR="msm-kernel"
-
-        # 1. Thermal Fix (Header missing)
+        # 1. Thermal Fix
         if [ -f "$MSM_DIR/drivers/thermal/thermal_sysfs.c" ]; then
              sed -i '1i #include <linux/mm.h>' "$MSM_DIR/drivers/thermal/thermal_sysfs.c"
-             echo "✅ Fixed thermal_sysfs.c"
         fi
-
-        # 2. Stack Pointer Fix (Error: register 'sp' unsuitable)
+        # 2. Stack Pointer Fix
         SP_FILE="$MSM_DIR/arch/arm64/include/asm/stack_pointer.h"
         if [ -f "$SP_FILE" ]; then
              sed -i 's/register unsigned long current_stack_pointer asm ("sp");/unsigned long current_stack_pointer = 0;/' "$SP_FILE"
-             echo "✅ Fixed stack_pointer.h"
         fi
-
-        # 3. KGDB Fix (Error: value '1025' out of range)
+        # 3. KGDB Fix
         KGDB_FILE="$MSM_DIR/arch/arm64/include/asm/kgdb.h"
         if [ -f "$KGDB_FILE" ]; then
              sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' "$KGDB_FILE"
-             echo "✅ Fixed kgdb.h"
         fi
         echo "::endgroup::"
 
-    - name: 🔥 Build Kernel
+    - name: 🔥 Build Kernel (Auto-Find Config)
       shell: bash
       run: |
         set -euo pipefail
         cd ${{ env.WORKSPACE_DIR }}/kernel_platform
         
-        echo "::group::Linking Build Config..."
-        if [ -f "common/build.config.gki.aarch64" ]; then
-            ln -sf common/build.config.gki.aarch64 build.config
-        elif [ -f "common/build.config" ]; then
-            ln -sf common/build.config build.config
+        echo "::group::🔍 DEBUG: File Structure"
+        ls -F
+        echo "--------------------------------"
+        echo "::endgroup::"
+
+        echo "::group::🚀 Setting up Build Config..."
+        # Forcefully find the GKI config and copy it to root as 'build.config'
+        # Hum file ko dhoondh kar zabardasti root par copy kar rahe hain
+        echo "Searching for build.config.gki.aarch64..."
+        find . -name "build.config.gki.aarch64" -exec cp -v {} build.config \; -print -quit
+        
+        # Check if copy worked
+        if [ -f "build.config" ]; then
+            echo "✅ FOUND IT! build.config created successfully."
         else
-            ln -sf msm-kernel/build.config build.config
+            echo "⚠️ GKI config not found, searching for ANY build.config..."
+            find . -name "build.config.msm.waipio" -exec cp -v {} build.config \; -print -quit
+        fi
+
+        # Final check
+        if [ ! -f "build.config" ]; then
+            echo "❌ CRITICAL ERROR: Could not find any build config file!"
+            echo "Listing all build files for debugging:"
+            find . -name "build.config*"
+            exit 1
         fi
         echo "::endgroup::"
 
-        echo "::group::Starting Build..."
+        echo "::group::🔥 Starting Build Script..."
         export BUILD_CONFIG=build.config
         ./build/build.sh -c waipio_gki -t waipio_gki -a arm64 -v 5.10
         echo "::endgroup::"
