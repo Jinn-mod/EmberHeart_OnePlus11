@@ -1,5 +1,5 @@
-name: Build OnePlus EmberHeart Kernel (Auto-Fix Config)
-description: 'Full Repo Sync with Auto-Discovery of Build Config'
+name: Build OnePlus EmberHeart Kernel (Python Method)
+description: 'Full Sync + Python Build (Proven Method)'
 
 inputs:
   op_config_json:
@@ -66,7 +66,7 @@ runs:
         EOF
         done
 
-        # CRITICAL COMPILER FIXES
+        # CRITICAL FIXES (Teeno zaruri hain)
         MSM_DIR="msm-kernel"
         # 1. Thermal Fix
         if [ -f "$MSM_DIR/drivers/thermal/thermal_sysfs.c" ]; then
@@ -84,50 +84,36 @@ runs:
         fi
         echo "::endgroup::"
 
-    - name: 🔥 Build Kernel (Auto-Find Config)
+    - name: 🔥 Build Kernel (Python Method)
       shell: bash
       run: |
         set -euo pipefail
         cd ${{ env.WORKSPACE_DIR }}/kernel_platform
         
-        echo "::group::🔍 DEBUG: File Structure"
-        ls -F
-        echo "--------------------------------"
+        echo "::group::Starting Build with Python..."
+        # Ye command pehle kaam kar chuki hai, isliye hum ispar wapas aa gaye
+        # Bas is baar humare paas drivers ka backup bhi hai
+        python3 ./build/build.py --config waipio_gki --arch arm64
         echo "::endgroup::"
 
-        echo "::group::🚀 Setting up Build Config..."
-        # Forcefully find the GKI config and copy it to root as 'build.config'
-        # Hum file ko dhoondh kar zabardasti root par copy kar rahe hain
-        echo "Searching for build.config.gki.aarch64..."
-        find . -name "build.config.gki.aarch64" -exec cp -v {} build.config \; -print -quit
+    - name: 📦 Force Collect Artifacts
+      if: always()
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Output directory banate hain
+        mkdir -p ${{ env.WORKSPACE_DIR }}/artifacts
         
-        # Check if copy worked
-        if [ -f "build.config" ]; then
-            echo "✅ FOUND IT! build.config created successfully."
-        else
-            echo "⚠️ GKI config not found, searching for ANY build.config..."
-            find . -name "build.config.msm.waipio" -exec cp -v {} build.config \; -print -quit
-        fi
+        echo "Searching for Image and boot.img everywhere..."
+        # Jahan bhi mile, utha lo!
+        find ${{ env.WORKSPACE_DIR }}/out -name "Image" -type f -exec cp -v {} ${{ env.WORKSPACE_DIR }}/artifacts/ \;
+        find ${{ env.WORKSPACE_DIR }}/out -name "boot.img" -type f -exec cp -v {} ${{ env.WORKSPACE_DIR }}/artifacts/ \;
+        
+        ls -R ${{ env.WORKSPACE_DIR }}/artifacts
 
-        # Final check
-        if [ ! -f "build.config" ]; then
-            echo "❌ CRITICAL ERROR: Could not find any build config file!"
-            echo "Listing all build files for debugging:"
-            find . -name "build.config*"
-            exit 1
-        fi
-        echo "::endgroup::"
-
-        echo "::group::🔥 Starting Build Script..."
-        export BUILD_CONFIG=build.config
-        ./build/build.sh -c waipio_gki -t waipio_gki -a arm64 -v 5.10
-        echo "::endgroup::"
-
-    - name: 📦 Collect Artifacts
+    - name: 📤 Upload Artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: Jinn-NetHunter-Final
-        path: |
-          ${{ env.WORKSPACE_DIR }}/out/**/Image
-          ${{ env.WORKSPACE_DIR }}/out/**/boot.img
+        name: Jinn-NetHunter-PythonBuild
+        path: ${{ env.WORKSPACE_DIR }}/artifacts/*
