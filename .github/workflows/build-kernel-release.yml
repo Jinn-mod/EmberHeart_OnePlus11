@@ -5,6 +5,14 @@
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.set-op-model.outputs.matrix) }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      # 👇 SHIELDS (Ye zaroori hai taaki error na aaye)
+      KCFLAGS: "-Wno-error -Wno-unused-variable -Wno-frame-larger-than= -Wno-single-bit-bitfield-constant-conversion"
+
     steps:
       # ---------------------------------------------------------
       # ☢️ 1. STORAGE NUKE (Space Bachao)
@@ -36,48 +44,25 @@
           sudo apt-get install -y bc bison build-essential curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip clang lld llvm
 
       # ---------------------------------------------------------
-      # 🛡️ 4. FIX SOURCE ERRORS
+      # 🛡️ 4. FIX SOURCE ERRORS (Indentation Fixed)
       # ---------------------------------------------------------
-            - name: Fix Source Code Errors & Inject NetHunter
+      - name: Fix Source Code Errors
         run: |
           echo "🛡️ Fixing stack_pointer and kgdb..."
           find . -name stack_pointer.h -exec sed -i 's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer;/' {} +
           find . -name kgdb.h -exec sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' {} +
 
-          echo "💉 Injecting NetHunter Features (Built-in = y)..."
-          # Hum saare config files me NetHunter features append kar rahe hain
-          find arch/arm64/configs/vendor -name "*gki.config" -o -name "*defconfig" | while read config_file; do
-            echo "Patching $config_file..."
-            echo "CONFIG_USB_CONFIGFS_F_HID=y" >> "$config_file"
-            echo "CONFIG_USB_CONFIGFS_F_ACC=y" >> "$config_file"
-            echo "CONFIG_USB_CONFIGFS_UEVENT=y" >> "$config_file"
-            echo "CONFIG_MAC80211=y" >> "$config_file"
-            echo "CONFIG_MAC80211_LEDS=y" >> "$config_file"
-            echo "CONFIG_MAC80211_MESH=y" >> "$config_file"
-            echo "CONFIG_CDROM=y" >> "$config_file"
-            echo "CONFIG_IP_SET=y" >> "$config_file"
-            echo "CONFIG_NETFILTER_XT_TARGET_HL=y" >> "$config_file"
-            echo "CONFIG_NETFILTER_XT_MATCH_HL=y" >> "$config_file"
-            # RTL8188EU Driver (Staging)
-            echo "CONFIG_STAGING=y" >> "$config_file"
-            echo "CONFIG_R8188EU=y" >> "$config_file"
-            echo "CONFIG_RTL8188EU=y" >> "$config_file"
-          done
-
       # ---------------------------------------------------------
-      # 💉 5. CONFIGURE & INJECT NETHUNTER (The Magic Step)
+      # 💉 5. CONFIGURE & INJECT NETHUNTER (Correct Logic)
       # ---------------------------------------------------------
       - name: Configure and Inject NetHunter Features
         run: |
-          # Pehle Default Config Generate karo (Assuming defconfig is setup via previous steps or default)
-          # Note: Agar specific defconfig chahiye, toh yahan 'make ... defconfig' command add karna padega.
-          # Filhal hum 'olddefconfig' use kar rahe hain jo existing .config ya default use karega.
-          
-          # Environment Variables
+          # Environment Variables Set karo
           export ARCH=arm64
           export CC=clang
           export LLVM=1
           
+          # Pehle Base Config Generate karo
           make O=out olddefconfig
 
           echo "💉 Injecting NetHunter Features into Kernel Image..."
@@ -110,7 +95,7 @@
           cd ..
 
       # ---------------------------------------------------------
-      # 🔥 6. BUILD KERNEL IMAGE (No Modules Job Needed)
+      # 🔥 6. BUILD KERNEL IMAGE (Ye Missing tha!)
       # ---------------------------------------------------------
       - name: Build Kernel Image
         run: |
@@ -119,12 +104,11 @@
           export LLVM=1
           export LLVM_IAS=1
           
-          make -j$(nproc --all) O=out \
-              KCFLAGS="-Wno-error -Wno-unused-variable -Wno-frame-larger-than=" \
-              Image
+          # Sirf Image bana rahe hain (Modules built-in ho gaye)
+          make -j$(nproc --all) O=out Image
 
       # ---------------------------------------------------------
-      # 📤 7. UPLOAD ARTIFACT (Download karne ke liye)
+      # 📤 7. UPLOAD ARTIFACT (Ye bhi zaroori hai)
       # ---------------------------------------------------------
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
