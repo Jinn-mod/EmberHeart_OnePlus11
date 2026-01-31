@@ -1,5 +1,5 @@
-name: Build OnePlus EmberHeart Kernel (Python Method)
-description: 'Full Sync + Python Build (Proven Method)'
+name: Build OnePlus EmberHeart Kernel (Manual Make)
+description: 'Direct Make Build - Bypassing Broken Scripts'
 
 inputs:
   op_config_json:
@@ -19,13 +19,14 @@ runs:
         echo "CONFIG=OP10-Pro" >> "$GITHUB_ENV"
         echo "WORKSPACE_DIR=${{ github.workspace }}/workspace" >> "$GITHUB_ENV"
 
-    - name: 📦 Install Dependencies
+    - name: 📦 Install Dependencies (With Cross Compilers)
       shell: bash
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y git curl build-essential clang lld flex bison \
         libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool libxml2-utils \
-        rsync unzip dwarves file python3 ccache python3-pip
+        rsync unzip dwarves file python3 ccache python3-pip \
+        gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
         # Repo Tool
         sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
@@ -43,16 +44,55 @@ runs:
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
         echo "::endgroup::"
 
-    - name: 💉 Inject NetHunter & Fixes
+    - name: 🛠️ Apply Critical Fixes
       shell: bash
       run: |
         set -euo pipefail
-        cd ${{ env.WORKSPACE_DIR }}/kernel_platform
+        # Folder check
+        if [ ! -d "${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel" ]; then
+            echo "❌ ERROR: msm-kernel folder not found! Repo sync failed?"
+            exit 1
+        fi
         
-        echo "::group::Injecting Configs..."
-        find common/arch/arm64/configs -name "gki_defconfig" -o -name "waipio_GKI.config" | while read config_file; do
-          echo "Patching: $config_file"
-          cat >> "$config_file" <<EOF
+        cd ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel
+        
+        echo "::group::Applying Patches..."
+        # 1. Thermal Fix (Header missing)
+        if [ -f "drivers/thermal/thermal_sysfs.c" ]; then
+             sed -i '1i #include <linux/mm.h>' "drivers/thermal/thermal_sysfs.c"
+             echo "✅ Fixed thermal_sysfs.c"
+        fi
+        # 2. Stack Pointer Fix
+        SP_FILE="arch/arm64/include/asm/stack_pointer.h"
+        if [ -f "$SP_FILE" ]; then
+             sed -i 's/register unsigned long current_stack_pointer asm ("sp");/unsigned long current_stack_pointer = 0;/' "$SP_FILE"
+             echo "✅ Fixed stack_pointer.h"
+        fi
+        # 3. KGDB Fix
+        KGDB_FILE="arch/arm64/include/asm/kgdb.h"
+        if [ -f "$KGDB_FILE" ]; then
+             sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' "$KGDB_FILE"
+             echo "✅ Fixed kgdb.h"
+        fi
+        echo "::endgroup::"
+
+    - name: 🔥 Build Kernel (Manual Mode)
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel
+        
+        echo "::group::Configuring Kernel..."
+        # Output directory banate hain
+        mkdir -p out
+        
+        # 1. Configs Merge karte hain (Google Base + OnePlus Vendor)
+        # Ye wahi kaam hai jo build.sh karta hai, par hum manually kar rahe hain
+        ./scripts/kconfig/merge_config.sh -O out arch/arm64/configs/gki_defconfig arch/arm64/configs/vendor/waipio_GKI.config
+        
+        # 2. NetHunter Configs Inject karte hain (Directly into out/.config)
+        echo "Injecting NetHunter..."
+        cat >> out/.config <<EOF
         CONFIG_USB_CONFIGFS_F_HID=y
         CONFIG_USB_CONFIGFS_F_ACC=y
         CONFIG_USB_CONFIGFS_UEVENT=y
@@ -64,56 +104,30 @@ runs:
         CONFIG_TCP_CONG_BBR=y
         CONFIG_LOCALVERSION="-NetHunter-Jinn"
         EOF
-        done
-
-        # CRITICAL FIXES (Teeno zaruri hain)
-        MSM_DIR="msm-kernel"
-        # 1. Thermal Fix
-        if [ -f "$MSM_DIR/drivers/thermal/thermal_sysfs.c" ]; then
-             sed -i '1i #include <linux/mm.h>' "$MSM_DIR/drivers/thermal/thermal_sysfs.c"
-        fi
-        # 2. Stack Pointer Fix
-        SP_FILE="$MSM_DIR/arch/arm64/include/asm/stack_pointer.h"
-        if [ -f "$SP_FILE" ]; then
-             sed -i 's/register unsigned long current_stack_pointer asm ("sp");/unsigned long current_stack_pointer = 0;/' "$SP_FILE"
-        fi
-        # 3. KGDB Fix
-        KGDB_FILE="$MSM_DIR/arch/arm64/include/asm/kgdb.h"
-        if [ -f "$KGDB_FILE" ]; then
-             sed -i 's/asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/\/\/ asm ("brk %0" : : "I" (KGDB_COMPILED_DBG_BRK_IMM));/' "$KGDB_FILE"
-        fi
+        
+        # 3. Old Defconfig run karte hain taaki sab set ho jaye
+        make ARCH=arm64 O=out olddefconfig
         echo "::endgroup::"
 
-    - name: 🔥 Build Kernel (Python Method)
-      shell: bash
-      run: |
-        set -euo pipefail
-        cd ${{ env.WORKSPACE_DIR }}/kernel_platform
-        
-        echo "::group::Starting Build with Python..."
-        # Ye command pehle kaam kar chuki hai, isliye hum ispar wapas aa gaye
-        # Bas is baar humare paas drivers ka backup bhi hai
-        python3 ./build/build.py --config waipio_gki --arch arm64
+        echo "::group::🚀 Compiling Image..."
+        # Ye hai wo command jo bina script ke chalti hai
+        # LLVM_IAS=1 zaroori hai assembler error hatane ke liye
+        make -j$(nproc --all) \
+             ARCH=arm64 \
+             LLVM=1 \
+             LLVM_IAS=1 \
+             O=out \
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+             CC="ccache clang" \
+             Image
         echo "::endgroup::"
 
-    - name: 📦 Force Collect Artifacts
-      if: always()
-      shell: bash
-      run: |
-        set -euo pipefail
-        # Output directory banate hain
-        mkdir -p ${{ env.WORKSPACE_DIR }}/artifacts
-        
-        echo "Searching for Image and boot.img everywhere..."
-        # Jahan bhi mile, utha lo!
-        find ${{ env.WORKSPACE_DIR }}/out -name "Image" -type f -exec cp -v {} ${{ env.WORKSPACE_DIR }}/artifacts/ \;
-        find ${{ env.WORKSPACE_DIR }}/out -name "boot.img" -type f -exec cp -v {} ${{ env.WORKSPACE_DIR }}/artifacts/ \;
-        
-        ls -R ${{ env.WORKSPACE_DIR }}/artifacts
-
-    - name: 📤 Upload Artifacts
+    - name: 📦 Collect Artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: Jinn-NetHunter-PythonBuild
-        path: ${{ env.WORKSPACE_DIR }}/artifacts/*
+        name: Jinn-NetHunter-Manual
+        path: |
+          ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel/out/arch/arm64/boot/Image
+          ${{ env.WORKSPACE_DIR }}/kernel_platform/msm-kernel/out/**/boot.img
